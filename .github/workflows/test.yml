@@ -1,7 +1,9 @@
 name: 基础测试
 
 # 由 MisakaStudy 仓库的 trigger.yml 通过 repository_dispatch 触发（PR 事件）
-# 检出 MisakaStudy 对应 commit 执行测试，并把聚合状态回写到该 commit
+# 检出 MisakaStudy 对应 commit 执行测试；OpenAPI 导出先推送规范到 PR 分支，
+# checks 在其后把聚合状态回写到「PR 当前 head」（避免导出 commit 使旧 head 的
+# status 在 PR 上失效），并以单条固定评论汇总门禁结果。
 on:
   repository_dispatch:
     types: [misaka_pr]
@@ -35,6 +37,74 @@ jobs:
               - 'task/**'
             edge_apis:
               - 'edge/apis/**'
+
+  export-openapi:
+    name: 生成并提交 OpenAPI 规范
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - name: 签出 MisakaStudy 代码
+        uses: actions/checkout@v4
+        with:
+          repository: Sakana-1314/MisakaStudy
+          ref: ${{ github.event.client_payload.ref }}
+          token: ${{ secrets.PAT }}
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: 生成 OpenAPI 规范
+        run: python scripts/export_openapi.py
+
+      - name: 检查文件变更
+        id: diff
+        run: |
+          if [ -n "$(git status --porcelain -- openapi.yaml)" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 提交 OpenAPI 规范
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add openapi.yaml
+          git commit -m "docs: 更新 OpenAPI 规范 [skip ci]"
+          git push origin HEAD:${{ github.event.client_payload.head_ref }}
+
+      - name: 回写导出状态到 MisakaStudy
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.PAT }}
+          PR_NUMBER: ${{ github.event.client_payload.pr_number }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          state=failure
+          if [ "${{ job.status }}" = "success" ]; then state=success; fi
+          HEAD="${{ github.event.client_payload.ref }}"
+          if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "null" ]; then
+            CUR="$(gh api "repos/Sakana-1314/MisakaStudy/pulls/$PR_NUMBER" --jq '.head.sha' 2>/dev/null || true)"
+            if [ -n "$CUR" ]; then HEAD="$CUR"; fi
+          fi
+          # job context 无 name 字段、github.job_id 在配置阶段为空，改为按本步骤名反查当前 job 的 ID
+          JOB_ID="$(gh api "repos/${{ github.repository }}/actions/runs/$RUN_ID/jobs" \
+            --jq '.jobs[] | select(any(.steps[]; .name == "回写导出状态到 MisakaStudy")) | .id' | head -1)"
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/$RUN_ID/job/$JOB_ID"
+          gh api -X POST \
+            repos/Sakana-1314/MisakaStudy/statuses/$HEAD \
+            -f state="$state" \
+            -f context='导出 OpenAPI 规范（Runner）' \
+            -f description='由 MisakaStudy-Runner 仓库代为执行' \
+            -f target_url="$RUN_URL"
 
   server-tests:
     name: 服务端测试
@@ -76,7 +146,8 @@ jobs:
       - name: Pytest 接口测试
         # 仅运行无需外部环境的测试（路由黄金测试 + 单元测试）；E2E 由 e2e-tests.yml 承担
         run: >-
-          pytest tests/test_routes.py tests/test_feishu.py tests/test_scheduler.py
+          pytest tests/test_routes.py tests/test_feishu.py tests/test_push_queue.py
+          tests/test_dingtalk.py tests/test_notify.py tests/test_scheduler.py
           tests/test_user_service.py tests/test_weixin.py -v
 
       - name: Pytest 在线接口测试（faceToken）
@@ -155,15 +226,17 @@ jobs:
 
   checks:
     name: 测试通过检查
-    # 无论测试 job 是跳过还是失败都运行，聚合为明确的合并门禁结论
+    # 无论测试/导出 job 是跳过还是失败都运行，聚合为明确的合并门禁结论；
+    # 依赖 export-openapi 保证导出 commit 已落地后，再回写到 PR 当前 head。
     if: always()
-    needs: [detect, server-tests, task-tests, edge-apis-tests]
+    needs: [detect, export-openapi, server-tests, task-tests, edge-apis-tests]
     runs-on: ubuntu-24.04
     steps:
       - name: 检查测试结果
         run: |
           results=(
             "${{ needs.detect.result }}"
+            "${{ needs.export-openapi.result }}"
             "${{ needs.server-tests.result }}"
             "${{ needs.task-tests.result }}"
             "${{ needs.edge-apis-tests.result }}"
@@ -185,25 +258,43 @@ jobs:
         run: |
           state=failure
           if [ "${{ job.status }}" = "success" ]; then state=success; fi
+          HEAD="${{ github.event.client_payload.ref }}"
+          if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "null" ]; then
+            CUR="$(gh api "repos/Sakana-1314/MisakaStudy/pulls/$PR_NUMBER" --jq '.head.sha' 2>/dev/null || true)"
+            if [ -n "$CUR" ]; then HEAD="$CUR"; fi
+          fi
           # job context 无 name 字段、github.job_id 在配置阶段为空，改为按本步骤名反查当前 job 的 ID
-          JOB_ID="$(gh api "repos/${{ github.repository }}/actions/runs/$RUN_ID/jobs" \
+          TEST_JOB_ID="$(gh api "repos/${{ github.repository }}/actions/runs/$RUN_ID/jobs" \
             --jq '.jobs[] | select(any(.steps[]; .name == "回写测试状态到 MisakaStudy")) | .id' | head -1)"
-          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/$RUN_ID/job/$JOB_ID"
+          EXP_JOB_ID="$(gh api "repos/${{ github.repository }}/actions/runs/$RUN_ID/jobs" \
+            --jq '.jobs[] | select(any(.steps[]; .name == "回写导出状态到 MisakaStudy")) | .id' | head -1)"
+          TEST_RUN_URL="https://github.com/${{ github.repository }}/actions/runs/$RUN_ID/job/$TEST_JOB_ID"
+          EXP_RUN_URL="https://github.com/${{ github.repository }}/actions/runs/$RUN_ID/job/$EXP_JOB_ID"
           gh api -X POST \
-            repos/Sakana-1314/MisakaStudy/statuses/${{ github.event.client_payload.ref }} \
+            repos/Sakana-1314/MisakaStudy/statuses/$HEAD \
             -f state="$state" \
             -f context='测试通过检查（Runner）' \
             -f description='由 MisakaStudy-Runner 仓库代为执行' \
-            -f target_url="$RUN_URL"
+            -f target_url="$TEST_RUN_URL"
 
-          # 以 bot 风格在 PR 上发评论，引用工作流 Job 链接
-          if [ -n "$PR_NUMBER" ]; then
-            if [ "$state" = "success" ]; then
-              summary="测试通过 ✅"
+          # 单条固定评论：先在 PR 上找固定标记的已有评论，存在则更新，否则新增
+          if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "null" ]; then
+            MARKER='🤖 **MisakaStudy Runner** 门禁汇总'
+            state_text="✅"
+            [ "$state" = "success" ] || state_text="❌"
+            exp_state="$(gh api "repos/Sakana-1314/MisakaStudy/commits/$HEAD/status" \
+              --jq -r '[.statuses[] | select(.context == "导出 OpenAPI 规范（Runner）")] | .[0].state // empty' 2>/dev/null || true)"
+            exp_text="✅"
+            [ "$exp_state" = "success" ] || exp_text="❌"
+            body="$(printf '%s\n\n- 测试通过检查（Runner）：%s\n  [查看测试 Job](%s)\n- 导出 OpenAPI 规范（Runner）：%s\n  [查看导出 Job](%s)' \
+              "$MARKER" "$state_text" "$TEST_RUN_URL" "$exp_text" "$EXP_RUN_URL")"
+            existing="$(gh api "repos/Sakana-1314/MisakaStudy/issues/$PR_NUMBER/comments?per_page=100" \
+              --jq --arg m "$MARKER" '[.[] | select((.body // "") | contains($m))] | .[0].id // empty' || true)"
+            if [ -n "$existing" ]; then
+              jq -n --arg body "$body" '{body:$body}' | \
+                gh api -X PATCH "repos/Sakana-1314/MisakaStudy/issues/comments/$existing" --input -
             else
-              summary="测试未通过 ❌"
+              jq -n --arg body "$body" '{body:$body}' | \
+                gh api -X POST "repos/Sakana-1314/MisakaStudy/issues/$PR_NUMBER/comments" --input -
             fi
-            body=$(printf '🤖 **MisakaStudy Runner**：%s\n\n[查看测试工作流 Job](%s)' "$summary" "$RUN_URL")
-            jq -n --arg body "$body" '{body:$body}' | \
-              gh api -X POST "repos/Sakana-1314/MisakaStudy/issues/$PR_NUMBER/comments" --input -
           fi
