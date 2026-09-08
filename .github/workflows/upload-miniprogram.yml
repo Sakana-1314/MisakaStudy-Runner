@@ -5,9 +5,9 @@ name: 小程序代码上传
 #   2) 自动：MisakaStudy（私有侧）在 trigger.yml 判断 miniprogram/** 是否改动，
 #      命中后经 repository_dispatch(misaka_miniprogram) 派发——Runner 收到请求即始终执行上传，
 #      不再自行过滤路径。
-#      - PR 事件：版本号「PR #<编号>」（开发期临时版，占用 CI 机器人 21-30）；
-#        PR 合并时 trigger.yml 会以 closed 活动再转发一次，Runner 查得 merged=true，
-#        以完全相同的 commit 再传一次「PR #<编号>（已合并）」（代码内容与合并前一致）。
+#      - PR 事件（开启/同步）：版本号「PR #<编号>」（开发期临时版，占用 CI 机器人 21-30）。
+#      - PR 事件（合并，closed+merged）：以完全相同的 commit 再传一次「PR #<编号>（已合并）」。
+#      - PR 事件（关闭未合并，closed+!merged）：以完全相同的 commit 再传一次「PR #<编号>（已关闭）」。
 #      - push 事件（PR 合并落库后 next 的主分支提交）：版本号 v4.YYYY.MM.DD，robot 1。
 # 所有直传都只上传为开发版本，不会提交审核；版本描述统一写「由 GitHub Actions 自动上传！」。
 #
@@ -87,11 +87,15 @@ jobs:
 
           if [ "$EVENT" = "repository_dispatch" ]; then
             if [ "$PAYLOAD_EVENT" = "pull_request" ]; then
-              # 检出的仍是 PR head commit，无论合并前后代码内容完全一致
-              # 查 PR 是否已合并：合并后（closed+merged）再转发一次，命名为「PR #<编号>（已合并）」
-              MERGED="$(gh api repos/Sakana-1314/MisakaStudy/pulls/"$PR_NUMBER" --jq '.merged')"
+              # 检出的仍是 PR head commit，无论合并/关闭/开启代码内容完全一致
+              # 查 PR 状态：merged →「PR #N（已合并）」；closed →「PR #N（已关闭）」；其余 →「PR #N」
+              PR_DATA="$(gh api repos/Sakana-1314/MisakaStudy/pulls/"$PR_NUMBER")"
+              MERGED="$(echo "$PR_DATA" | jq -r '.merged')"
+              STATE="$(echo "$PR_DATA" | jq -r '.state')"
               if [ "$MERGED" = "true" ]; then
                 VERSION="PR #${PR_NUMBER}（已合并）"
+              elif [ "$STATE" = "closed" ]; then
+                VERSION="PR #${PR_NUMBER}（已关闭）"
               else
                 VERSION="PR #${PR_NUMBER}"
               fi
