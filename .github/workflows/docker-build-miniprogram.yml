@@ -71,7 +71,7 @@ jobs:
           GH_TOKEN: ${{ secrets.PAT }}
         run: |
           echo "timestamp=$(date +%s)" >> "$GITHUB_OUTPUT"
-          echo "version=$(scripts/next-version.sh Sakana-1314/MisakaStudy)" >> "$GITHUB_OUTPUT"
+          echo "version=$(miniprogram/scripts/next-version.sh Sakana-1314/MisakaStudy)" >> "$GITHUB_OUTPUT"
 
       - name: 构建并推送
         uses: docker/build-push-action@v6

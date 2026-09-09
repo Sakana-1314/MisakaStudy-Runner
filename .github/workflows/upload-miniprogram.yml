@@ -103,7 +103,7 @@ jobs:
             else
               # push 主分支（PR 合并落库后）：版本号 v4.YYYY.MM.DD-hotfix.N（读源码仓库最后一次 tag 同日期自增）；robot 1
               ROOT="$(git rev-parse --show-toplevel)"
-              VERSION="$("$ROOT/scripts/next-version.sh" Sakana-1314/MisakaStudy)"
+              VERSION="$("$ROOT/miniprogram/scripts/next-version.sh" Sakana-1314/MisakaStudy)"
               ROBOT=1
             fi
             DESC="由 GitHub Actions 自动上传！"
@@ -111,7 +111,7 @@ jobs:
             VERSION="$VERSION_INPUT"
             if [ -z "$VERSION" ]; then
               ROOT="$(git rev-parse --show-toplevel)"
-              VERSION="$("$ROOT/scripts/next-version.sh" Sakana-1314/MisakaStudy)"
+              VERSION="$("$ROOT/miniprogram/scripts/next-version.sh" Sakana-1314/MisakaStudy)"
             fi
             ROBOT="$ROBOT_INPUT"
             DESC="$DESC_INPUT"
