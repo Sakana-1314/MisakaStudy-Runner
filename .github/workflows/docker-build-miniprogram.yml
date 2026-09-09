@@ -70,8 +70,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.PAT }}
         run: |
+          set -euo pipefail
+          # 版本号为空（如并发创建 tag 冲突且重试耗尽）时直接失败，禁止发布无版本号的脏镜像
+          version="$(miniprogram/scripts/next-version.sh Sakana-1314/MisakaStudy)"
+          test -n "$version"
           echo "timestamp=$(date +%s)" >> "$GITHUB_OUTPUT"
-          echo "version=$(miniprogram/scripts/next-version.sh Sakana-1314/MisakaStudy)" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: 构建并推送
         uses: docker/build-push-action@v6
