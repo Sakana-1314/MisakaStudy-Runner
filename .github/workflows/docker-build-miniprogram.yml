@@ -62,13 +62,16 @@ jobs:
           username: ${{ secrets.TENCENT_REGISTRY_USERNAME }}
           password: ${{ secrets.TENCENT_REGISTRY_PASSWORD }}
 
-      - name: 生成构建参数
+      - name: 计算版本号并创建 tag
         id: meta
-        # 版本号加 -b<构建序号> 后缀（镜像 tag 仍固定），ci-client 上传小程序时携带，
-        # 避免同日多次构建/上传版本号重复；GITHUB_RUN_NUMBER 每次运行唯一且单调递增。
+        # 版本号 v4.YYYY.MM.DD-hotfix.N：读取 MisakaStudy 源码仓库最后一次的 tag 同日期自增，
+        # 并创建同名 tag 作为下次自增依据（ci-client 上传小程序代码时携带此版本号）。
+        # 镜像 tag 仍为固定 chaoxing:miniprogram，仅上传版本号参与自增。
+        env:
+          GH_TOKEN: ${{ secrets.PAT }}
         run: |
           echo "timestamp=$(date +%s)" >> "$GITHUB_OUTPUT"
-          echo "version=v4.$(TZ=Asia/Shanghai date +%Y.%m.%d)-b${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "version=$(scripts/next-version.sh Sakana-1314/MisakaStudy)" >> "$GITHUB_OUTPUT"
 
       - name: 构建并推送
         uses: docker/build-push-action@v6
