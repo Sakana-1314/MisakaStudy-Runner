@@ -64,9 +64,11 @@ jobs:
 
       - name: 生成构建参数
         id: meta
+        # 版本号加 -b<构建序号> 后缀（镜像 tag 仍固定），ci-client 上传小程序时携带，
+        # 避免同日多次构建/上传版本号重复；GITHUB_RUN_NUMBER 每次运行唯一且单调递增。
         run: |
           echo "timestamp=$(date +%s)" >> "$GITHUB_OUTPUT"
-          echo "version=v4.$(TZ=Asia/Shanghai date +%Y.%m.%d)" >> "$GITHUB_OUTPUT"
+          echo "version=v4.$(TZ=Asia/Shanghai date +%Y.%m.%d)-b${{ github.run_number }}" >> "$GITHUB_OUTPUT"
 
       - name: 构建并推送
         uses: docker/build-push-action@v6

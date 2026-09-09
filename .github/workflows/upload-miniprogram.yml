@@ -1,14 +1,14 @@
 name: 小程序代码上传
 
 # 触发方式：
-#   1) 手动：本仓库 Actions 页「Run workflow」，把源码直传为体验版（版本号 v4.YYYY.MM.DD）。
+#   1) 手动：本仓库 Actions 页「Run workflow」，把源码直传为体验版（版本号 v4.YYYY.MM.DD-b<构建序号>，同日多次上传不重复）。
 #   2) 自动：MisakaStudy（私有侧）在 trigger.yml 判断 miniprogram/** 是否改动，
 #      命中后经 repository_dispatch(misaka_miniprogram) 派发——Runner 收到请求即始终执行上传，
 #      不再自行过滤路径。
 #      - PR 事件（开启/同步）：版本号「PR #<编号>」（开发期临时版，占用 CI 机器人 21-30）。
 #      - PR 事件（合并，closed+merged）：以完全相同的 commit 再传一次「PR #<编号>（已合并）」。
 #      - PR 事件（关闭未合并，closed+!merged）：以完全相同的 commit 再传一次「PR #<编号>（已关闭）」。
-#      - push 事件（PR 合并落库后 next 的主分支提交）：版本号 v4.YYYY.MM.DD，robot 1。
+#      - push 事件（PR 合并落库后 next 的主分支提交）：版本号 v4.YYYY.MM.DD-b<构建序号>（同日多次上传不重复），robot 1。
 # 所有直传都只上传为开发版本，不会提交审核；版本描述统一写「由 GitHub Actions 自动上传！」。
 #
 # appid 与代码上传密钥取自检出的 MisakaStudy 仓库自身：
@@ -25,7 +25,7 @@ on:
         default: "next"
         type: string
       version:
-        description: 版本号（留空则自动用 v4.<当天日期>）
+        description: 版本号（留空则自动用 v4.<当天日期>-b<构建序号>，同日多次上传不重复）
         required: false
         default: ""
         type: string
@@ -101,14 +101,14 @@ jobs:
               fi
               ROBOT=$(( 21 + (PR_NUMBER % 10) ))
             else
-              # push 主分支（PR 合并落库后）：用日期版本号，robot 1
-              VERSION="$(TZ=Asia/Shanghai date +v4.%Y.%m.%d)"
+              # push 主分支（PR 合并落库后）：日期版本号 + 构建序号后缀，避免同日多次上传版本号重复；robot 1
+              VERSION="$(TZ=Asia/Shanghai date +v4.%Y.%m.%d)-b${GITHUB_RUN_NUMBER}"
               ROBOT=1
             fi
             DESC="由 GitHub Actions 自动上传！"
           else
             VERSION="$VERSION_INPUT"
-            [ -z "$VERSION" ] && VERSION="$(TZ=Asia/Shanghai date +v4.%Y.%m.%d)"
+            [ -z "$VERSION" ] && VERSION="$(TZ=Asia/Shanghai date +v4.%Y.%m.%d)-b${GITHUB_RUN_NUMBER}"
             ROBOT="$ROBOT_INPUT"
             DESC="$DESC_INPUT"
           fi
