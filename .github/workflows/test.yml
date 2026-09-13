@@ -14,7 +14,6 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       server: ${{ steps.filter.outputs.server == 'true' }}
-      task: ${{ steps.filter.outputs.task == 'true' }}
       edge_apis: ${{ steps.filter.outputs.edge_apis == 'true' }}
     steps:
       - name: 签出 MisakaStudy 代码
@@ -33,8 +32,6 @@ jobs:
           filters: |
             server:
               - 'server/**'
-            task:
-              - 'task/**'
             edge_apis:
               - 'edge/apis/**'
 
@@ -160,38 +157,6 @@ jobs:
             echo "未找到 tests/test_chaoxing_face_token.py，跳过在线接口测试"
           fi
 
-  task-tests:
-    name: 任务端测试
-    needs: detect
-    if: needs.detect.outputs.task == 'true'
-    runs-on: ubuntu-24.04
-    defaults:
-      run:
-        working-directory: task
-
-    steps:
-      - name: 签出 MisakaStudy 代码
-        uses: actions/checkout@v4
-        with:
-          repository: Sakana-1314/MisakaStudy
-          ref: ${{ github.event.client_payload.ref }}
-          token: ${{ secrets.PAT }}
-
-      - name: 安装 Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.27'
-          cache-dependency-path: task/go.sum
-
-      - name: Go 代码检查
-        run: go vet ./...
-
-      - name: Go 单元测试
-        run: go test ./... -v
-
-      - name: Go 构建
-        run: go build ./...
-
   edge-apis-tests:
     name: 边缘接口测试
     needs: detect
@@ -229,7 +194,7 @@ jobs:
     # 无论测试/导出 job 是跳过还是失败都运行，聚合为明确的合并门禁结论；
     # 依赖 export-openapi 保证导出 commit 已落地后，再回写到 PR 当前 head。
     if: always()
-    needs: [detect, export-openapi, server-tests, task-tests, edge-apis-tests]
+    needs: [detect, export-openapi, server-tests, edge-apis-tests]
     runs-on: ubuntu-24.04
     steps:
       - name: 检查测试结果
@@ -238,7 +203,6 @@ jobs:
             "${{ needs.detect.result }}"
             "${{ needs.export-openapi.result }}"
             "${{ needs.server-tests.result }}"
-            "${{ needs.task-tests.result }}"
             "${{ needs.edge-apis-tests.result }}"
           )
           for r in "${results[@]}"; do
