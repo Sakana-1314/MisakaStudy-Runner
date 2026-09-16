@@ -71,15 +71,10 @@ jobs:
         working-directory: miniprogram
         run: |
           set -euo pipefail
-          APPID="$(jq -r '.appid' project.config.json)"
-          KEY_PATH=".private/private.${APPID}.key"
-          [ -f "$KEY_PATH" ] || { echo "未找到代码上传密钥 $KEY_PATH"; exit 1; }
           npx --no-install miniprogram-ci pack-npm \
-            --appid "$APPID" \
-            --pp . \
-            --pkp "$KEY_PATH" \
-            --locales zh
-          test -d ./miniprogram_npm/tdesign-miniprogram
+            --pp ./ \
+            --pkp .private/private.wxb42fe32e6e071916.key \
+            --appid wxb42fe32e6e071916
 
       - name: 上传小程序代码
         id: run_upload
