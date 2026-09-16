@@ -71,13 +71,14 @@ jobs:
         working-directory: miniprogram
         run: |
           set -euo pipefail
-          printf 'ci-pack-npm' > /tmp/ci.pack.key
+          APPID="$(jq -r '.appid' project.config.json)"
+          KEY_PATH=".private/private.${APPID}.key"
+          [ -f "$KEY_PATH" ] || { echo "未找到代码上传密钥 $KEY_PATH"; exit 1; }
           npx --no-install miniprogram-ci pack-npm \
-            --appid "" \
+            --appid "$APPID" \
             --pp . \
-            --pkp /tmp/ci.pack.key \
+            --pkp "$KEY_PATH" \
             --locales zh
-          rm -f /tmp/ci.pack.key
           test -d ./miniprogram_npm/tdesign-miniprogram
 
       - name: 上传小程序代码
