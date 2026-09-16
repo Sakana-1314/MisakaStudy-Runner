@@ -63,10 +63,27 @@ jobs:
         with:
           node-version: "20"
 
-      - name: 安装 miniprogram-ci
+      - name: 安装依赖
         working-directory: miniprogram
-        # 仅安装 CI 命令行工具；源码依赖已预构建为 miniprogram_npm，无需构建 npm
-        run: npm install --no-save --no-audit --no-fund miniprogram-ci@2.1.19
+        # 仓库不再提交 miniprogram_npm，这里按 package.json 安装全部依赖，
+        # 随后用 miniprogram-ci 的 pack-npm 实时构建 miniprogram_npm
+        run: npm install --no-audit --no-fund --include=dev
+
+      - name: 构建 miniprogram_npm
+        working-directory: miniprogram
+        # pack-npm 只按 appid 读取 project.config.json 打包 node_modules，
+        # 不上传也不校验密钥，故用临时占位密钥
+        run: |
+          set -euo pipefail
+          APPID="$(jq -r '.appid' project.config.json)"
+          printf 'ci-pack-npm' > /tmp/ci.pack.key
+          npx --no-install miniprogram-ci pack-npm \
+            --appid "$APPID" \
+            --pp . \
+            --pkp /tmp/ci.pack.key \
+            --locales zh
+          rm -f /tmp/ci.pack.key
+          test -d ./miniprogram_npm/tdesign-miniprogram
 
       - name: 上传小程序代码
         id: run_upload
