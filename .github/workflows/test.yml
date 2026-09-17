@@ -15,6 +15,7 @@ jobs:
     outputs:
       server: ${{ steps.filter.outputs.server == 'true' }}
       edge_apis: ${{ steps.filter.outputs.edge_apis == 'true' }}
+      edge_manger: ${{ steps.filter.outputs.edge_manger == 'true' }}
     steps:
       - name: 签出 MisakaStudy 代码
         uses: actions/checkout@v4
@@ -34,6 +35,8 @@ jobs:
               - 'server/**'
             edge_apis:
               - 'edge/apis/**'
+            edge_manger:
+              - 'edge/manger/**'
 
   export-openapi:
     name: 生成并提交 OpenAPI 规范
@@ -189,12 +192,47 @@ jobs:
       - name: Go 构建
         run: go build ./...
 
+  edge-manger-tests:
+    name: 边缘管理程序测试
+    needs: detect
+    if: needs.detect.outputs.edge_manger == 'true'
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: edge/manger
+
+    steps:
+      - name: 签出 MisakaStudy 代码
+        uses: actions/checkout@v4
+        with:
+          repository: Sakana-1314/MisakaStudy
+          ref: ${{ github.event.client_payload.ref }}
+          token: ${{ secrets.PAT }}
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          cache-dependency-path: edge/manger/go.sum
+
+      - name: Go 代码格式检查
+        run: test -z "$(gofmt -l .)"
+
+      - name: Go 代码检查
+        run: go vet ./...
+
+      - name: Go 单元测试
+        run: go test ./... -v
+
+      - name: Go 构建
+        run: go build ./...
+
   checks:
     name: 测试通过检查
     # 无论测试/导出 job 是跳过还是失败都运行，聚合为明确的合并门禁结论；
     # 依赖 export-openapi 保证导出 commit 已落地后，再回写到 PR 当前 head。
     if: always()
-    needs: [detect, export-openapi, server-tests, edge-apis-tests]
+    needs: [detect, export-openapi, server-tests, edge-apis-tests, edge-manger-tests]
     runs-on: ubuntu-24.04
     steps:
       - name: 检查测试结果
@@ -204,6 +242,7 @@ jobs:
             "${{ needs.export-openapi.result }}"
             "${{ needs.server-tests.result }}"
             "${{ needs.edge-apis-tests.result }}"
+            "${{ needs.edge-manger-tests.result }}"
           )
           for r in "${results[@]}"; do
             if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
