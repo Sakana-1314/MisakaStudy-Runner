@@ -10,6 +10,8 @@ name: 小程序代码上传
 #      - PR 事件（关闭未合并，closed+!merged）：以完全相同的 commit 再传一次「PR #<编号>（已关闭）」。
 #      - push 事件（PR 合并落库后 next 的主分支提交）：版本号 v4.YYYY.MM.DD-hotfix.N（读源码仓库最后一次 tag 同日期自增），robot 1。
 # 所有直传都只上传为开发版本，不会提交审核；版本描述统一写「由 GitHub Actions 自动上传！」。
+# 上传前调用 miniprogram/scripts/inject-build-info.js，把版本号与构建时间写进被上传代码的
+# utils/config.ci.js——开发版/体验版无法从 wx.getAccountInfoSync 取到线上版本号，只能这样注入。
 #
 # appid 与代码上传密钥取自检出的 MisakaStudy 仓库自身：
 #   - appid：miniprogram/project.config.json 的 appid 字段
@@ -126,6 +128,8 @@ jobs:
           fi
 
           echo "上传目标 appid=${APPID} version=${VERSION} robot=${ROBOT}"
+          # 开发版/体验版取不到线上版本号，把本次版本号与构建时间注入代码（设置页版本信息栏展示）
+          node scripts/inject-build-info.js "$VERSION" "$(date +%s)"
           npx --no-install miniprogram-ci upload \
             --appid "$APPID" \
             --pp . \
