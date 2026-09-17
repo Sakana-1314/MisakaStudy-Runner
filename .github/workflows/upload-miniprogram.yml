@@ -8,8 +8,9 @@ name: 小程序代码上传
 #      - PR 事件（开启/同步）：版本号「PR #<编号>」（开发期临时版，占用 CI 机器人 21-30）。
 #      - PR 事件（合并，closed+merged）：以完全相同的 commit 再传一次「PR #<编号>（已合并）」。
 #      - PR 事件（关闭未合并，closed+!merged）：以完全相同的 commit 再传一次「PR #<编号>（已关闭）」。
-#      - push 事件（PR 合并落库后 next 的主分支提交）：版本号 v4.YYYY.MM.DD-hotfix.N（读源码仓库最后一次 tag 同日期自增），robot 1。
-# 所有直传都只上传为开发版本，不会提交审核；版本描述统一写「由 GitHub Actions 自动上传！」。
+#      - push 事件（PR 合并落库后 next 的主分支提交）：版本号 v4.YYYY.MM.DD-hotfix.N（读源码仓库最后一次 tag 同日期自增），
+#        版本描述取该 commit 的标题，robot 1。
+# 所有直传都只上传为开发版本，不会提交审核；PR 上传的版本描述统一写「由 GitHub Actions 自动上传！」。
 # 上传前调用 miniprogram/scripts/inject-build-info.js，把版本号与构建时间写进被上传代码的
 # utils/config.ci.js——开发版/体验版无法从 wx.getAccountInfoSync 取到线上版本号，只能这样注入。
 #
@@ -110,13 +111,15 @@ jobs:
                 VERSION="PR #${PR_NUMBER}"
               fi
               ROBOT=$(( 21 + (PR_NUMBER % 10) ))
+              DESC="由 GitHub Actions 自动上传！"
             else
               # push 主分支（PR 合并落库后）：版本号 v4.YYYY.MM.DD-hotfix.N（读源码仓库最后一次 tag 同日期自增）；robot 1
               ROOT="$(git rev-parse --show-toplevel)"
               VERSION="$("$ROOT/miniprogram/scripts/next-version.sh" Sakana-1314/MisakaStudy)"
               ROBOT=1
+              # 版本描述取被上传 commit 的标题，体验版版本记录里直接看得出这次改了什么
+              DESC="$(git log -1 --pretty=%s)"
             fi
-            DESC="由 GitHub Actions 自动上传！"
           else
             VERSION="$VERSION_INPUT"
             if [ -z "$VERSION" ]; then
