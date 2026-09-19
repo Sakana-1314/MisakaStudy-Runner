@@ -141,14 +141,15 @@ jobs:
         run: pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Ruff 代码检查
-        run: ruff check src/
+        run: ruff check src/ tests/
 
       - name: Pytest 接口测试
         # 仅运行无需外部环境的测试（路由黄金测试 + 单元测试）；E2E 由 e2e-tests.yml 承担
         run: >-
           pytest tests/test_routes.py tests/test_feishu.py tests/test_push_queue.py
           tests/test_dingtalk.py tests/test_notify.py tests/test_scheduler.py
-          tests/test_user_service.py tests/test_weixin.py -v
+          tests/test_user_service.py tests/test_weixin.py tests/test_qqbot_service.py
+          tests/test_qqbot_router.py tests/test_qqbot_signature.py -v
 
       - name: Pytest 在线接口测试（faceToken）
         # 用 CX_USERNAME/CX_PASSWORD 登录超星并验证 faceToken 接口；隐私红线：
