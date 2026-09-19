@@ -16,6 +16,7 @@ jobs:
       server: ${{ steps.filter.outputs.server == 'true' }}
       edge_apis: ${{ steps.filter.outputs.edge_apis == 'true' }}
       edge_manger: ${{ steps.filter.outputs.edge_manger == 'true' }}
+      bot: ${{ steps.filter.outputs.bot == 'true' }}
     steps:
       - name: 签出 MisakaStudy 代码
         uses: actions/checkout@v4
@@ -37,6 +38,8 @@ jobs:
               - 'edge/apis/**'
             edge_manger:
               - 'edge/manger/**'
+            bot:
+              - 'bot/**'
 
   export-openapi:
     name: 生成并提交 OpenAPI 规范
@@ -227,12 +230,48 @@ jobs:
       - name: Go 构建
         run: go build ./...
 
+  bot-tests:
+    name: QQ 机器人测试
+    needs: detect
+    if: needs.detect.outputs.bot == 'true'
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: bot
+
+    steps:
+      - name: 签出 MisakaStudy 代码
+        uses: actions/checkout@v4
+        with:
+          repository: Sakana-1314/MisakaStudy
+          ref: ${{ github.event.client_payload.ref }}
+          token: ${{ secrets.PAT }}
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: |
+            bot/requirements.txt
+            bot/requirements-dev.txt
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Ruff 代码检查
+        run: ruff check src/ tests/
+
+      - name: Pytest 单元测试
+        # 全部离线运行：SQL 通道与飞书推送均为替身，不触网
+        run: pytest -v
+
   checks:
     name: 测试通过检查
     # 无论测试/导出 job 是跳过还是失败都运行，聚合为明确的合并门禁结论；
     # 依赖 export-openapi 保证导出 commit 已落地后，再回写到 PR 当前 head。
     if: always()
-    needs: [detect, export-openapi, server-tests, edge-apis-tests, edge-manger-tests]
+    needs: [detect, export-openapi, server-tests, edge-apis-tests, edge-manger-tests, bot-tests]
     runs-on: ubuntu-24.04
     steps:
       - name: 检查测试结果
@@ -243,6 +282,7 @@ jobs:
             "${{ needs.server-tests.result }}"
             "${{ needs.edge-apis-tests.result }}"
             "${{ needs.edge-manger-tests.result }}"
+            "${{ needs.bot-tests.result }}"
           )
           for r in "${results[@]}"; do
             if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
