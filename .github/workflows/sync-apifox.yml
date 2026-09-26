@@ -8,8 +8,10 @@ name: 同步 OpenAPI 到 Apifox
 # 导入走 Apifox 开放 API（POST /v1/projects/{projectId}/import-openapi），不用 apifox-cli：
 # CLI 属「自动化调用方」，写主分支会被 Apifox 的 AI 权限保护拦截（Automation caller branch required），开放 API 无此限制。
 #
-# 同步语义：仓库里的 server/openapi.yaml 是唯一事实来源，接口/数据模型按 method+path、名称匹配后覆盖；
-# 不传 deleteUnmatchedResources，Apifox 里手工新增的资源不会被删。
+# 同步语义：仓库里的 server/openapi.yaml 是唯一事实来源，导入是整体覆盖而非增量追加——
+# 匹配到的接口/数据模型按 method+path、名称覆盖，规范里已不存在的接口/数据模型一并删除
+# （deleteUnmatchedResources），否则接口删掉后 Apifox 里仍会残留。
+# 代价：该项目内不属于本规范的手工资源同样会被清除，接口只写在 Apifox 里就会被下次同步抹掉。
 # 机密：APIFOX_TOKEN（Apifox「用户头像 → 账号设置 → API 访问令牌」），仅经环境变量透传，不落日志。
 # 安全红线（公开仓库）：仅允许 repository_dispatch 与 workflow_dispatch，不配置 push / pull_request 直接触发。
 
@@ -79,11 +81,18 @@ jobs:
 
           BODY="$RUNNER_TEMP/apifox-import.json"
           RESP="$RUNNER_TEMP/apifox-response.json"
+          # 覆盖式导入会连带删除 Apifox 里规范已不存在的资源，规范异常（paths 为空）会清空整个项目，
+          # 因此先确认规范里确实解析出接口路径再发起导入。
+          PATHS="$(grep -cE '^  /' server/openapi.yaml || true)"
+          [ "$PATHS" -gt 0 ] || { echo "::error::server/openapi.yaml 里没有解析到接口路径，拒绝覆盖导入以免清空 Apifox 项目"; exit 1; }
+          echo "规范内接口路径数：$PATHS"
+
           # input 直接给规范文本：MisakaStudy 是私有仓库，openapi.yaml 的 raw 地址无法匿名拉取。
           # updateFolderOfChangedEndpoint=true：规范的 tags 是接口所属目录的唯一来源，
           # 已存在的接口也要跟着 tag 走，否则它们会一直留在 Root 目录。
+          # deleteUnmatchedResources=true：覆盖式同步，规范里删掉的接口/数据模型在 Apifox 一并删除。
           jq -n --rawfile spec server/openapi.yaml \
-            '{input:$spec, options:{endpointOverwriteBehavior:"OVERWRITE_EXISTING", schemaOverwriteBehavior:"OVERWRITE_EXISTING", updateFolderOfChangedEndpoint:true}}' \
+            '{input:$spec, options:{endpointOverwriteBehavior:"OVERWRITE_EXISTING", schemaOverwriteBehavior:"OVERWRITE_EXISTING", updateFolderOfChangedEndpoint:true, deleteUnmatchedResources:true}}' \
             > "$BODY"
 
           CODE=""
