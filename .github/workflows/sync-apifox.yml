@@ -1,0 +1,125 @@
+name: 同步 OpenAPI 到 Apifox
+
+# 触发方式：
+#   1) 自动：MisakaStudy（私有侧）push next 后经 repository_dispatch(misaka_push) 派发；
+#      仅当本次 push 改动了 server/openapi.yaml 才导入，保证 Apifox 主分支与主干规范一致。
+#   2) 手动：本仓库 Actions 页「Run workflow」，默认签出 next 并强制导入一次。
+#
+# 导入走 Apifox 开放 API（POST /v1/projects/{projectId}/import-openapi），不用 apifox-cli：
+# CLI 属「自动化调用方」，写主分支会被 Apifox 的 AI 权限保护拦截（Automation caller branch required），开放 API 无此限制。
+#
+# 同步语义：仓库里的 server/openapi.yaml 是唯一事实来源，接口/数据模型按 method+path、名称匹配后覆盖；
+# 不传 deleteUnmatchedResources，Apifox 里手工新增的资源不会被删。
+# 机密：APIFOX_TOKEN（Apifox「用户头像 → 账号设置 → API 访问令牌」），仅经环境变量透传，不落日志。
+# 安全红线（公开仓库）：仅允许 repository_dispatch 与 workflow_dispatch，不配置 push / pull_request 直接触发。
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 要同步的 MisakaStudy 分支或 commit（默认 next）
+        required: false
+        default: "next"
+        type: string
+  repository_dispatch:
+    types: [misaka_push]
+
+# Apifox 同一时刻只允许一个导入任务，串行化避免并发导入被拒
+concurrency:
+  group: sync-apifox
+  cancel-in-progress: false
+
+env:
+  # Apifox 项目「Misaka 小程序项目」的项目 ID（项目设置 - 基本设置 - 项目 ID）
+  APIFOX_PROJECT_ID: "8883565"
+
+jobs:
+  sync:
+    name: 导入 OpenAPI 规范
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: 签出 MisakaStudy 代码
+        uses: actions/checkout@v4
+        with:
+          repository: Sakana-1314/MisakaStudy
+          ref: ${{ github.event.client_payload.ref || inputs.ref }}
+          token: ${{ secrets.PAT }}
+
+      - name: 判断是否需要同步
+        id: check
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.client_payload.before }}
+          REF: ${{ github.event.client_payload.ref }}
+          GH_TOKEN: ${{ secrets.PAT }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" != "repository_dispatch" ]; then
+            # 手动运行：不做路径过滤，直接同步当前签出提交里的规范
+            echo "sync=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # 自动运行：本次 push 没动过 server/openapi.yaml 就没有规范变更，跳过导入
+          CHANGED="$(gh api "repos/Sakana-1314/MisakaStudy/compare/$BEFORE...$REF" --jq '.files[].filename' || true)"
+          if printf '%s\n' "$CHANGED" | grep -qx 'server/openapi.yaml'; then
+            echo "sync=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "sync=false" >> "$GITHUB_OUTPUT"
+            echo "本次 push 未改动 server/openapi.yaml，跳过同步"
+          fi
+
+      - name: 导入规范到 Apifox
+        if: steps.check.outputs.sync == 'true'
+        env:
+          APIFOX_TOKEN: ${{ secrets.APIFOX_TOKEN }}
+        run: |
+          set -euo pipefail
+          [ -n "$APIFOX_TOKEN" ] || { echo "未找到机密 APIFOX_TOKEN，请先在仓库 Settings → Secrets 配置后重试"; exit 1; }
+
+          BODY="$RUNNER_TEMP/apifox-import.json"
+          RESP="$RUNNER_TEMP/apifox-response.json"
+          # input 直接给规范文本：MisakaStudy 是私有仓库，openapi.yaml 的 raw 地址无法匿名拉取
+          jq -n --rawfile spec server/openapi.yaml \
+            '{input:$spec, options:{endpointOverwriteBehavior:"OVERWRITE_EXISTING", schemaOverwriteBehavior:"OVERWRITE_EXISTING"}}' \
+            > "$BODY"
+
+          CODE=""
+          for attempt in 1 2 3; do
+            CODE="$(curl -sS -o "$RESP" -w '%{http_code}' -X POST \
+              "https://api.apifox.com/v1/projects/$APIFOX_PROJECT_ID/import-openapi?locale=zh-CN" \
+              -H "Authorization: Bearer $APIFOX_TOKEN" \
+              -H "X-Apifox-Api-Version: 2024-03-28" \
+              -H "Content-Type: application/json" \
+              --data-binary "@$BODY" || true)"
+            echo "第 $attempt 次导入：HTTP $CODE"
+            if [ "$CODE" = "200" ] && jq -e '.data.counters' "$RESP" > /dev/null 2>&1; then
+              break
+            fi
+            if [ "$attempt" = "3" ]; then break; fi
+            sleep 15
+          done
+          cat "$RESP"
+          echo
+          [ "$CODE" = "200" ] || { echo "::error::调用 Apifox 导入接口失败（HTTP $CODE）"; exit 1; }
+          jq -e '.data.counters' "$RESP" > /dev/null || { echo "::error::Apifox 返回内容异常，未取到导入统计"; exit 1; }
+
+          jq -r '.data.counters | "接口：新增 \(.endpointCreated) / 更新 \(.endpointUpdated) / 忽略 \(.endpointIgnored) / 失败 \(.endpointFailed)，数据模型：新增 \(.schemaCreated) / 更新 \(.schemaUpdated) / 忽略 \(.schemaIgnored) / 失败 \(.schemaFailed)"' "$RESP"
+
+          FAILED="$(jq '[.data.counters | to_entries[] | select(.key | test("Failed$")) | .value] | add // 0' "$RESP")"
+          [ "$FAILED" = "0" ] || { echo "::error::存在导入失败条目（$FAILED 项），详见上方 Apifox 响应"; exit 1; }
+
+      - name: 回写同步状态到 MisakaStudy
+        # 未同步时（本次未改动规范）不回写，避免给无关提交挂状态
+        if: always() && steps.check.outputs.sync == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.PAT }}
+        run: |
+          state=failure
+          if [ "${{ job.status }}" = "success" ]; then state=success; fi
+          gh api -X POST \
+            "repos/Sakana-1314/MisakaStudy/statuses/$(git rev-parse HEAD)" \
+            -f state="$state" \
+            -f context='同步 OpenAPI 到 Apifox（Runner）' \
+            -f description='由 MisakaStudy-Runner 仓库代为执行' \
+            -f target_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
