@@ -79,9 +79,11 @@ jobs:
 
           BODY="$RUNNER_TEMP/apifox-import.json"
           RESP="$RUNNER_TEMP/apifox-response.json"
-          # input 直接给规范文本：MisakaStudy 是私有仓库，openapi.yaml 的 raw 地址无法匿名拉取
+          # input 直接给规范文本：MisakaStudy 是私有仓库，openapi.yaml 的 raw 地址无法匿名拉取。
+          # updateFolderOfChangedEndpoint=true：规范的 tags 是接口所属目录的唯一来源，
+          # 已存在的接口也要跟着 tag 走，否则它们会一直留在 Root 目录。
           jq -n --rawfile spec server/openapi.yaml \
-            '{input:$spec, options:{endpointOverwriteBehavior:"OVERWRITE_EXISTING", schemaOverwriteBehavior:"OVERWRITE_EXISTING"}}' \
+            '{input:$spec, options:{endpointOverwriteBehavior:"OVERWRITE_EXISTING", schemaOverwriteBehavior:"OVERWRITE_EXISTING", updateFolderOfChangedEndpoint:true}}' \
             > "$BODY"
 
           CODE=""
