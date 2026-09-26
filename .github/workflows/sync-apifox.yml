@@ -115,7 +115,8 @@ jobs:
           [ "$CODE" = "200" ] || { echo "::error::调用 Apifox 导入接口失败（HTTP $CODE）"; exit 1; }
           jq -e '.data.counters' "$RESP" > /dev/null || { echo "::error::Apifox 返回内容异常，未取到导入统计"; exit 1; }
 
-          jq -r '.data.counters | "接口：新增 \(.endpointCreated) / 更新 \(.endpointUpdated) / 忽略 \(.endpointIgnored) / 失败 \(.endpointFailed)，数据模型：新增 \(.schemaCreated) / 更新 \(.schemaUpdated) / 忽略 \(.schemaIgnored) / 失败 \(.schemaFailed)"' "$RESP"
+          # 删除数是覆盖式同步的预期结果（规范里已不存在的资源被清掉），只打印不作为失败条件
+          jq -r '.data.counters | "接口：新增 \(.endpointCreated) / 更新 \(.endpointUpdated) / 忽略 \(.endpointIgnored) / 失败 \(.endpointFailed) / 删除 \(.endpointDeleted)，数据模型：新增 \(.schemaCreated) / 更新 \(.schemaUpdated) / 忽略 \(.schemaIgnored) / 失败 \(.schemaFailed) / 删除 \(.schemaDeleted)"' "$RESP"
 
           FAILED="$(jq '[.data.counters | to_entries[] | select(.key | test("Failed$")) | .value] | add // 0' "$RESP")"
           [ "$FAILED" = "0" ] || { echo "::error::存在导入失败条目（$FAILED 项），详见上方 Apifox 响应"; exit 1; }
