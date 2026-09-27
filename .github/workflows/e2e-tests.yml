@@ -63,6 +63,8 @@ jobs:
       secret: e2e-test-secret-key-32chars!!
       # 内部令牌由环境变量注入（admin 表已删除），服务端进程与 E2E 客户端须取同一值
       INTERNAL_TOKEN: test-admin-token
+      # 主小程序 AppID（必填）：取测试假值，与 scripts/setup_e2e_db.py 种子的小程序一致
+      MAIN_APPID: wx-e2e-test-appid
 
     steps:
       - name: 签出 MisakaStudy 代码
