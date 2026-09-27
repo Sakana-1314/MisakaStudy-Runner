@@ -61,7 +61,8 @@ jobs:
       db_port: 3306
       db_name: misaka_test
       secret: e2e-test-secret-key-32chars!!
-      auth_token: test-admin-token
+      # 内部令牌由环境变量注入（admin 表已删除），服务端进程与 E2E 客户端须取同一值
+      INTERNAL_TOKEN: test-admin-token
 
     steps:
       - name: 签出 MisakaStudy 代码
