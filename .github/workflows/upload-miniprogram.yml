@@ -90,6 +90,7 @@ jobs:
           VERSION_INPUT: ${{ inputs.version }}
           ROBOT_INPUT: ${{ inputs.robot }}
           DESC_INPUT: ${{ inputs.desc }}
+          BASE_URL: ${{ secrets.BASE_URL }}
         run: |
           set -euo pipefail
           APPID="$(jq -r '.appid' project.config.json)"
@@ -130,8 +131,10 @@ jobs:
             DESC="$DESC_INPUT"
           fi
 
-          echo "上传目标 appid=${APPID} version=${VERSION} robot=${ROBOT}"
-          # 开发版/体验版取不到线上版本号，把本次版本号与构建时间注入代码（设置页版本信息栏展示）
+          # BASE_URL 是机密，GitHub 会在日志里打码；未配置时回落「线上」以便一眼看出覆盖没生效
+          echo "上传目标 appid=${APPID} version=${VERSION} robot=${ROBOT} baseUrl=${BASE_URL:-线上}"
+          # 开发版/体验版取不到线上版本号，把本次版本号与构建时间注入代码（设置页版本信息栏展示）；
+          # BASE_URL（机密，未配置时为空）一并传入，用于把体验版指向开发环境
           node scripts/inject-build-info.js "$VERSION" "$(date +%s)"
           npx --no-install miniprogram-ci upload \
             --appid "$APPID" \
