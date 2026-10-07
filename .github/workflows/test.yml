@@ -151,6 +151,13 @@ jobs:
           go install github.com/google/wire/cmd/wire@v0.7.0
           wire check ./internal/di
 
+      - name: 建表并写入测试数据
+        # 表结构不变量测试与需要库的单元测试都直接打真实 MySQL；库由本仓工具建，
+        # 保证中文列注释的字符集正确（用命令行客户端灌 SQL 会把注释写花）
+        run: |
+          go run ./cmd/dbinit
+          go run ./cmd/dbseed
+
       - name: 单元测试（含表结构不变量与分层边界）
         run: go test ./... -v
 
