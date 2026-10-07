@@ -59,12 +59,16 @@ jobs:
       db_password: test
       db_host: 127.0.0.1
       db_port: 3306
-      db_name: misaka_test
+      db_name: misaka_e2e
       secret: e2e-test-secret-key-32chars!!
-      # 内部令牌由环境变量注入（admin 表已删除），服务端进程与 E2E 客户端须取同一值
+      # 内部令牌由环境变量注入，服务端进程与 E2E 客户端须取同一值
       INTERNAL_TOKEN: test-admin-token
-      # 主小程序 AppID（必填）：取测试假值，与 scripts/setup_e2e_db.py 种子的小程序一致
+      # 主小程序 AppID（必填）：取测试假值，与 cmd/dbseed 种子的小程序一致
       MAIN_APPID: wx-e2e-test-appid
+      E2E_BASE_URL: http://127.0.0.1:8000
+      # 真机学习通账号：注入后在线用例才会执行（缺失时用例自行 skip）
+      CX_USERNAME: ${{ secrets.CX_USERNAME }}
+      CX_PASSWORD: ${{ secrets.CX_PASSWORD }}
 
     steps:
       - name: 签出 MisakaStudy 代码
@@ -74,25 +78,25 @@ jobs:
           ref: ${{ github.event.client_payload.ref }}
           token: ${{ secrets.PAT }}
 
-      - name: 安装 Python
-        uses: actions/setup-python@v5
+      - name: 安装 Go
+        uses: actions/setup-go@v5
         with:
-          python-version: '3.13'
-          cache: pip
-          cache-dependency-path: |
-            server/requirements.txt
-            server/requirements-dev.txt
-
-      - name: 安装依赖
-        run: pip install -r requirements.txt -r requirements-dev.txt
+          go-version: '1.27'
+          cache-dependency-path: server/go.sum
 
       - name: 创建数据库表并填充测试数据
-        run: python scripts/setup_e2e_db.py
+        run: |
+          go run ./cmd/dbinit
+          go run ./cmd/dbseed
 
       - name: 启动后端服务
         run: |
-          python -m src.main &
+          go build -o /tmp/misaka-server ./cmd/server
+          cd /tmp && mkdir -p e2e-run && cd e2e-run
+          cp -r "$GITHUB_WORKSPACE/server/templates" .
+          nohup /tmp/misaka-server > /tmp/e2e-run/server.log 2>&1 &
           echo $! > /tmp/server.pid
+          cd "$GITHUB_WORKSPACE/server"
 
       - name: 等待服务就绪
         run: |
@@ -108,7 +112,17 @@ jobs:
           exit 1
 
       - name: 运行 E2E 测试
-        run: pytest tests/test_e2e.py -v
+        run: go test ./tests/e2e/... -v
+
+      - name: 上传服务端日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-logs-e2e
+          path: |
+            /tmp/e2e-run/server.log
+            /tmp/e2e-run/logs/
+          if-no-files-found: ignore
 
       - name: 停止后端服务
         if: always()

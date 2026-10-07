@@ -39,7 +39,7 @@ jobs:
               - 'edge/manger/**'
 
   export-openapi:
-    name: 生成并提交 OpenAPI 规范
+    name: 校验 OpenAPI 规范
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -52,34 +52,17 @@ jobs:
           ref: ${{ github.event.client_payload.ref }}
           token: ${{ secrets.PAT }}
 
-      - name: 安装 Python
-        uses: actions/setup-python@v5
+      - name: 安装 Go
+        uses: actions/setup-go@v5
         with:
-          python-version: '3.13'
+          go-version: '1.27'
+          cache-dependency-path: server/go.sum
 
-      - name: 安装依赖
-        run: pip install -r requirements.txt -r requirements-dev.txt
-
-      - name: 生成 OpenAPI 规范
-        run: python scripts/export_openapi.py
-
-      - name: 检查文件变更
-        id: diff
-        run: |
-          if [ -n "$(git status --porcelain -- openapi.yaml)" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: 提交 OpenAPI 规范
-        if: steps.diff.outputs.changed == 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add openapi.yaml
-          git commit -m "docs: 更新 OpenAPI 规范 [skip ci]"
-          git push origin HEAD:${{ github.event.client_payload.head_ref }}
+      - name: 校验规范与路由表一致
+        # 规范是人工维护的接口事实来源：这里用回归测试锁定「规范 ↔ 注册路由」双向一致、
+        # 每个操作有中文说明与响应 schema、不出现 operationId。不做导出提交，
+        # 规范改动随代码一起进 PR，评审时可见。
+        run: go test ./internal/domain/ -run 'TestOpenAPISpecMatchesRoutes|TestSpecHasNoExtraPaths' -v
 
       - name: 回写导出状态到 MisakaStudy
         if: always()
@@ -95,7 +78,6 @@ jobs:
             CUR="$(gh api "repos/Sakana-1314/MisakaStudy/pulls/$PR_NUMBER" --jq '.head.sha' 2>/dev/null || true)"
             if [ -n "$CUR" ]; then HEAD="$CUR"; fi
           fi
-          # job context 无 name 字段、github.job_id 在配置阶段为空，改为按本步骤名反查当前 job 的 ID
           JOB_ID="$(gh api "repos/${{ github.repository }}/actions/runs/$RUN_ID/jobs" \
             --jq '.jobs[] | select(any(.steps[]; .name == "回写导出状态到 MisakaStudy")) | .id' | head -1)"
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/$RUN_ID/job/$JOB_ID"
@@ -115,8 +97,31 @@ jobs:
       run:
         working-directory: server
 
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: misaka_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
     env:
-      # faceToken 在线接口测试使用的测试账号（Runner 仓库 secrets）
+      # 服务端与测试进程共用同一套环境变量（大小写由 config 统一兼容）
+      db_user: root
+      db_password: test
+      db_host: 127.0.0.1
+      db_port: 3306
+      db_name: misaka_test
+      secret: e2e-test-secret-key-32chars!!
+      INTERNAL_TOKEN: test-admin-token
+      MAIN_APPID: wx-e2e-test-appid
+      # 真机学习通账号：只在存在时跑在线用例（缺失时用例自行 skip）
       CX_USERNAME: ${{ secrets.CX_USERNAME }}
       CX_PASSWORD: ${{ secrets.CX_PASSWORD }}
 
@@ -128,39 +133,128 @@ jobs:
           ref: ${{ github.event.client_payload.ref }}
           token: ${{ secrets.PAT }}
 
-      - name: 安装 Python
-        uses: actions/setup-python@v5
+      - name: 安装 Go
+        uses: actions/setup-go@v5
         with:
-          python-version: '3.13'
-          cache: pip
-          cache-dependency-path: |
-            server/requirements.txt
-            server/requirements-dev.txt
+          go-version: '1.27'
+          cache-dependency-path: server/go.sum
 
-      - name: 安装依赖
-        run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Go 代码格式检查
+        run: test -z "$(gofmt -l .)"
 
-      - name: Ruff 代码检查
-        run: ruff check src/ tests/
+      - name: Go 代码检查
+        run: go vet ./...
 
-      - name: Pytest 接口测试
-        # 仅运行无需外部环境的测试（路由黄金测试 + 单元测试）；E2E 由 e2e-tests.yml 承担。
-        # 不硬编码测试文件名：测试文件随领域重构而增删（如 server 从零重建后旧文件名不再存在），
-        # 硬编码会让整条命令因「file or directory not found」直接失败；改为跑全部并排除需要
-        # 外部环境的用例——需要数据库的用例在无库环境下自行 skip，不会伪装通过。
-        run: >-
-          pytest tests/ -v
-          --ignore=tests/test_e2e.py
-          --ignore=tests/test_chaoxing_face_token.py
-
-      - name: Pytest 在线接口测试（faceToken）
-        # 用 CX_USERNAME/CX_PASSWORD 登录超星并验证 faceToken 接口；隐私红线：
-        # 仅允许输出 /pptSign/check-face-result 响应，其余接口数据一律不落日志。
+      - name: 校验依赖注入装配
+        # wire 生成物必须与 provider 集合一致：手工改过 provider 却忘了重新生成时这里会拦下
         run: |
-          if [ -f tests/test_chaoxing_face_token.py ]; then
-            pytest tests/test_chaoxing_face_token.py -v
-          else
-            echo "未找到 tests/test_chaoxing_face_token.py，跳过在线接口测试"
+          go install github.com/google/wire/cmd/wire@v0.7.0
+          wire check ./internal/di
+
+      - name: 单元测试（含表结构不变量与分层边界）
+        run: go test ./... -v
+
+  server-e2e:
+    name: 服务端端到端测试
+    needs: detect
+    if: needs.detect.outputs.server == 'true'
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: server
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: misaka_e2e
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      # 被测服务与 E2E 测试进程共用同一套环境变量（含密钥，两边派生的令牌才同源）
+      db_user: root
+      db_password: test
+      db_host: 127.0.0.1
+      db_port: 3306
+      db_name: misaka_e2e
+      secret: e2e-test-secret-key-32chars!!
+      INTERNAL_TOKEN: test-admin-token
+      MAIN_APPID: wx-e2e-test-appid
+      E2E_BASE_URL: http://127.0.0.1:8000
+      # 真机学习通账号：注入后在线用例才会执行（缺失时用例自行 skip，不会伪装通过）
+      CX_USERNAME: ${{ secrets.CX_USERNAME }}
+      CX_PASSWORD: ${{ secrets.CX_PASSWORD }}
+
+    steps:
+      - name: 签出 MisakaStudy 代码
+        uses: actions/checkout@v4
+        with:
+          repository: Sakana-1314/MisakaStudy
+          ref: ${{ github.event.client_payload.ref }}
+          token: ${{ secrets.PAT }}
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          cache-dependency-path: server/go.sum
+
+      - name: 创建数据库表并填充种子数据
+        run: |
+          go run ./cmd/dbinit
+          go run ./cmd/dbseed
+
+      - name: 启动后端服务
+        # 真实启动编译产物（不是进程内测试客户端），覆盖监听端口 → 中间件 → 路由 → 数据库整链路
+        run: |
+          go build -o /tmp/misaka-server ./cmd/server
+          cd /tmp && mkdir -p e2e-run && cd e2e-run
+          cp -r "$GITHUB_WORKSPACE/server/templates" .
+          nohup /tmp/misaka-server > /tmp/e2e-run/server.log 2>&1 &
+          echo $! > /tmp/server.pid
+          cd "$GITHUB_WORKSPACE/server"
+
+      - name: 等待服务就绪
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8000/api/public/state > /dev/null; then
+              echo "服务已就绪"
+              exit 0
+            fi
+            echo "等待服务启动... ($i/30)"
+            sleep 1
+          done
+          echo "服务启动超时"
+          cat /tmp/e2e-run/server.log || true
+          exit 1
+
+      - name: 运行端到端测试
+        # 覆盖每个接口的成功与关键错误路径；真实学习通账号的在线用例在同一套环境里执行
+        run: go test ./tests/e2e/... -v
+
+      - name: 上传服务端日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-logs
+          path: |
+            /tmp/e2e-run/server.log
+            /tmp/e2e-run/logs/
+          if-no-files-found: ignore
+
+      - name: 停止后端服务
+        if: always()
+        run: |
+          if [ -f /tmp/server.pid ]; then
+            kill $(cat /tmp/server.pid) 2>/dev/null || true
+            wait $(cat /tmp/server.pid) 2>/dev/null || true
           fi
 
   edge-apis-tests:
@@ -235,7 +329,7 @@ jobs:
     # 无论测试/导出 job 是跳过还是失败都运行，聚合为明确的合并门禁结论；
     # 依赖 export-openapi 保证导出 commit 已落地后，再回写到 PR 当前 head。
     if: always()
-    needs: [detect, export-openapi, server-tests, edge-apis-tests, edge-manger-tests]
+    needs: [detect, export-openapi, server-tests, server-e2e, edge-apis-tests, edge-manger-tests]
     runs-on: ubuntu-24.04
     steps:
       - name: 检查测试结果
@@ -244,6 +338,7 @@ jobs:
             "${{ needs.detect.result }}"
             "${{ needs.export-openapi.result }}"
             "${{ needs.server-tests.result }}"
+            "${{ needs.server-e2e.result }}"
             "${{ needs.edge-apis-tests.result }}"
             "${{ needs.edge-manger-tests.result }}"
           )
