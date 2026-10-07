@@ -231,6 +231,50 @@ jobs:
             /tmp/e2e-run/server.log
           if-no-files-found: ignore
 
+  server-live-tests:
+    name: 服务端真实上游测试
+    needs: detect
+    if: needs.detect.outputs.server == 'true'
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: server
+
+    env:
+      # 只做必填项；上游地址一律用配置默认值（即现网地址），真实请求测试要的正是那套默认值
+      secret: live-upstream-test-secret-32byte
+      db_name: misaka_test
+      db_user: root
+      db_password: test
+      db_host: 127.0.0.1
+      db_port: 3306
+      INTERNAL_TOKEN: live-internal-token
+      MAIN_APPID: wx-live-test
+      # 打开真实请求开关：显式开启后网络不可达按失败处理，不会伪装成 skip
+      LIVE_UPSTREAM: '1'
+
+    steps:
+      - name: 签出 MisakaStudy 代码
+        uses: actions/checkout@v4
+        with:
+          repository: Sakana-1314/MisakaStudy
+          ref: ${{ github.event.client_payload.ref }}
+          token: ${{ secrets.PAT }}
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          cache-dependency-path: server/go.sum
+
+      - name: 运行真实上游测试
+        # 打真实第三方：超星滑块验证码与登录页、DoH、QQ 机器人、飞书、钉钉、EdgeOne。
+        # 微信侧（jscode2session / access_token / getuserencryptkey）需要真实小程序凭据与
+        # 真实用户 code，不在本 job 覆盖；假上游对应的 E2E job 已覆盖微信链路。
+        # 用假凭据打真实服务，断言拿到确定的**业务错误**——这验证地址、参数名、签名算法
+        # 与错误解析在真实服务面前成立（假上游只能证明代码自洽）。
+        run: go test ./tests/live/... ./internal/upstreams/feishu/... ./internal/upstreams/dingtalk/... ./internal/upstreams/edgeone/... -v
+
   edge-apis-tests:
     name: 边缘接口测试
     needs: detect
@@ -303,7 +347,7 @@ jobs:
     # 无论测试/导出 job 是跳过还是失败都运行，聚合为明确的合并门禁结论；
     # 依赖 export-openapi 保证导出 commit 已落地后，再回写到 PR 当前 head。
     if: always()
-    needs: [detect, export-openapi, server-tests, server-e2e, edge-apis-tests, edge-manger-tests]
+    needs: [detect, export-openapi, server-tests, server-e2e, server-live-tests, edge-apis-tests, edge-manger-tests]
     runs-on: ubuntu-24.04
     steps:
       - name: 检查测试结果
@@ -313,6 +357,7 @@ jobs:
             "${{ needs.export-openapi.result }}"
             "${{ needs.server-tests.result }}"
             "${{ needs.server-e2e.result }}"
+            "${{ needs.server-live-tests.result }}"
             "${{ needs.edge-apis-tests.result }}"
             "${{ needs.edge-manger-tests.result }}"
           )
