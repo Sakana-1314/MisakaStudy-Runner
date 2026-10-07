@@ -213,37 +213,10 @@ jobs:
           go-version: '1.27'
           cache-dependency-path: server/go.sum
 
-      - name: 创建数据库表并填充种子数据
-        run: |
-          go run ./cmd/dbinit
-          go run ./cmd/dbseed
-
-      - name: 启动后端服务
-        # 真实启动编译产物（不是进程内测试客户端），覆盖监听端口 → 中间件 → 路由 → 数据库整链路
-        run: |
-          go build -o /tmp/misaka-server ./cmd/server
-          cd /tmp && mkdir -p e2e-run && cd e2e-run
-          cp -r "$GITHUB_WORKSPACE/server/templates" .
-          nohup /tmp/misaka-server > /tmp/e2e-run/server.log 2>&1 &
-          echo $! > /tmp/server.pid
-          cd "$GITHUB_WORKSPACE/server"
-
-      - name: 等待服务就绪
-        run: |
-          for i in $(seq 1 30); do
-            if curl -sf http://127.0.0.1:8000/api/public/state > /dev/null; then
-              echo "服务已就绪"
-              exit 0
-            fi
-            echo "等待服务启动... ($i/30)"
-            sleep 1
-          done
-          echo "服务启动超时"
-          cat /tmp/e2e-run/server.log || true
-          exit 1
-
       - name: 运行端到端测试
-        # 覆盖每个接口的成功与关键错误路径；真实学习通账号的在线用例在同一套环境里执行
+        # 测试自行完成：起假上游（微信 / 超星 / QQ，不触网）→ 建表与种子 → 编译并拉起真实
+        # 服务端进程（随机端口）→ 跑完全部接口用例 → 收尾。因此这里不需要预先启动服务，
+        # 也不会与开发机上已运行的服务抢 8000 端口。
         run: go test ./tests/e2e/... -v
 
       - name: 上传服务端日志
@@ -251,18 +224,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: server-logs
+          # 服务端由测试进程拉起在自己的临时目录里；失败时日志已随 `go test -v` 打进构建输出。
+          # 这里额外收集仓库内日志目录（本地路径场景），缺失不报错。
           path: |
+            server/logs/
             /tmp/e2e-run/server.log
-            /tmp/e2e-run/logs/
           if-no-files-found: ignore
-
-      - name: 停止后端服务
-        if: always()
-        run: |
-          if [ -f /tmp/server.pid ]; then
-            kill $(cat /tmp/server.pid) 2>/dev/null || true
-            wait $(cat /tmp/server.pid) 2>/dev/null || true
-          fi
 
   edge-apis-tests:
     name: 边缘接口测试
