@@ -149,7 +149,7 @@ jobs:
         # wire 生成物必须与 provider 集合一致：手工改过 provider 却忘了重新生成时这里会拦下
         run: |
           go install github.com/google/wire/cmd/wire@v0.7.0
-          wire check ./internal/di
+          wire check ./internal/core/di
 
       - name: 建表并写入测试数据
         # 表结构不变量测试与需要库的单元测试都直接打真实 MySQL；库由本仓工具建，
