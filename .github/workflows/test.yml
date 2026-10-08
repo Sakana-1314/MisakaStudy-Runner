@@ -275,6 +275,67 @@ jobs:
         # 与错误解析在真实服务面前成立（假上游只能证明代码自洽）。
         run: go test ./tests/live/... ./internal/upstreams/feishu/... ./internal/upstreams/dingtalk/... ./internal/upstreams/edgeone/... -v
 
+  server-fuzz-tests:
+    name: 服务端模糊测试
+    needs: detect
+    if: needs.detect.outputs.server == 'true'
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: server
+
+    env:
+      secret: fuzz-test-secret-key-32bytes!!!
+      db_name: misaka_test
+      db_user: root
+      db_password: test
+      db_host: 127.0.0.1
+      db_port: 3306
+      INTERNAL_TOKEN: fuzz-internal-token
+      MAIN_APPID: wx-fuzz-test
+      REQUEST_LOG_ENABLED: 'false'
+
+    steps:
+      - name: 签出 MisakaStudy 代码
+        uses: actions/checkout@v4
+        with:
+          repository: Sakana-1314/MisakaStudy
+          ref: ${{ github.event.client_payload.ref }}
+          token: ${{ secrets.PAT }}
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          cache-dependency-path: server/go.sum
+
+      - name: 模糊测试安全解析入口
+        # 这些函数（令牌、签名值、clientId）的输入全部来自网络，最重要的不变量是
+        # 「任意字节串都不得 panic」与「未正确签名的输入绝不被接受」。
+        # 时长按目标数控制，保证门禁总耗时可控。
+        run: |
+          set -euo pipefail
+          targets=(
+            FuzzVerifyShortSignTokens
+            FuzzDecodeTokens
+            FuzzVerifySignatureAndChallenge
+            FuzzDecodeAndDecrypt
+            FuzzDecryptClientInfo
+          )
+          for target in "${targets[@]}"; do
+            echo "::group::${target}"
+            go test -run '^$' -fuzz "^${target}$" -fuzztime 45s ./internal/core/security/
+            echo "::endgroup::"
+          done
+
+      - name: 归档失败语料
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-corpus-server
+          path: server/internal/core/security/testdata/fuzz/
+          if-no-files-found: ignore
+
   edge-apis-tests:
     name: 边缘接口测试
     needs: detect
@@ -347,7 +408,7 @@ jobs:
     # 无论测试/导出 job 是跳过还是失败都运行，聚合为明确的合并门禁结论；
     # 依赖 export-openapi 保证导出 commit 已落地后，再回写到 PR 当前 head。
     if: always()
-    needs: [detect, export-openapi, server-tests, server-e2e, server-live-tests, edge-apis-tests, edge-manger-tests]
+    needs: [detect, export-openapi, server-tests, server-e2e, server-live-tests, server-fuzz-tests, edge-apis-tests, edge-manger-tests]
     runs-on: ubuntu-24.04
     steps:
       - name: 检查测试结果
@@ -358,6 +419,7 @@ jobs:
             "${{ needs.server-tests.result }}"
             "${{ needs.server-e2e.result }}"
             "${{ needs.server-live-tests.result }}"
+            "${{ needs.server-fuzz-tests.result }}"
             "${{ needs.edge-apis-tests.result }}"
             "${{ needs.edge-manger-tests.result }}"
           )
