@@ -161,6 +161,15 @@ jobs:
       - name: 单元测试（含表结构不变量与分层边界）
         run: go test ./... -v
 
+      - name: 覆盖率门禁（生产代码不回退）
+        # 覆盖 cmd/ 与 internal/（不含 tests/ 测试基座），要求未覆盖块不超出基线。
+        # 剩余未覆盖块都是防御性分支（覆盖它们需要改生产代码），因此门禁盯的是「不回退」
+        # 而不是把数字凑成 100%：任何新增的未覆盖生产代码都会让这里变红。
+        run: |
+          set -euo pipefail
+          go test -count=1 -coverpkg=./... -coverprofile=cover.out ./...
+          go run ./cmd/covergate -profile cover.out -baseline scripts/coverage-baseline.txt -min 99
+
   server-e2e:
     name: 服务端端到端测试
     needs: detect
