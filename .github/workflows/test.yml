@@ -146,10 +146,11 @@ jobs:
         run: go vet ./...
 
       - name: 校验依赖注入装配
-        # wire 生成物必须与 provider 集合一致：手工改过 provider 却忘了重新生成时这里会拦下
-        run: |
-          go install github.com/google/wire/cmd/wire@v0.7.0
-          wire check ./internal/core/di
+        # 装配已从 google/wire（编译期代码生成）改为 uber/fx（运行期解析）：
+        # `wire check` 不再适用，「生成物与 provider 集合不一致」这类问题也不存在了。
+        # 但编译通过**不代表依赖图完整**，因此改用 fx.ValidateApp 在测试期解析整张图
+        # （tests/arch/wiring_test.go），缺 provider 或循环依赖会在这里被拦下。
+        run: go test -run TestDependencyGraph ./tests/arch/
 
       - name: 建表并写入测试数据
         # 表结构不变量测试与需要库的单元测试都直接打真实 MySQL；库由本仓工具建，
