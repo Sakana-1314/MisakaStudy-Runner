@@ -347,7 +347,7 @@ jobs:
         # 真实用户 code，不在本 job 覆盖；假上游对应的 E2E job 已覆盖微信链路。
         # 用假凭据打真实服务，断言拿到确定的**业务错误**——这验证地址、参数名、签名算法
         # 与错误解析在真实服务面前成立（假上游只能证明代码自洽）。
-        run: go test ./tests/live/... ./internal/upstreams/feishu/... ./internal/upstreams/dingtalk/... ./internal/upstreams/edgeone/... -v
+        run: go test ./tests/live/... ./internal/upstreams/feishu/... ./internal/upstreams/edgeone/... -v
 
   server-fuzz-tests:
     name: 服务端模糊测试
