@@ -62,7 +62,7 @@ jobs:
         # 规范是人工维护的接口事实来源：这里用回归测试锁定「规范 ↔ 注册路由」双向一致、
         # 每个操作有中文说明与响应 schema、不出现 operationId。不做导出提交，
         # 规范改动随代码一起进 PR，评审时可见。
-        run: go test ./internal/domain/ -run 'TestOpenAPISpecMatchesRoutes|TestSpecHasNoExtraPaths' -v
+        run: go test ./internal/server/ -run 'TestOpenAPISpecMatchesRoutes|TestSpecHasNoExtraPaths' -v
 
       - name: 回写导出状态到 MisakaStudy
         if: always()
