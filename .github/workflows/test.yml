@@ -398,7 +398,7 @@ jobs:
           )
           for target in "${targets[@]}"; do
             echo "::group::${target}"
-            go test -run '^$' -fuzz "^${target}$" -fuzztime 45s ./internal/core/security/
+            go test -run '^$' -fuzz "^${target}$" -fuzztime 45s ./internal/security/
             echo "::endgroup::"
           done
 
@@ -407,7 +407,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: fuzz-corpus-server
-          path: server/internal/core/security/testdata/fuzz/
+          path: server/internal/security/testdata/fuzz/
           if-no-files-found: ignore
 
   edge-apis-tests:
