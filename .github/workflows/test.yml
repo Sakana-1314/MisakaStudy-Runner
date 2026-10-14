@@ -121,9 +121,7 @@ jobs:
       secret: e2e-test-secret-key-32chars!!
       INTERNAL_TOKEN: test-admin-token
       MAIN_APPID: wx-e2e-test-appid
-      # 真机学习通账号：只在存在时跑在线用例（缺失时用例自行 skip）
-      CX_USERNAME: ${{ secrets.CX_USERNAME }}
-      CX_PASSWORD: ${{ secrets.CX_PASSWORD }}
+      # 真机学习通账号由下面「解析学习通测试凭据」步骤从 CX_STUDENT / CX_TEACHER 解析后写入 GITHUB_ENV
 
     steps:
       - name: 签出 MisakaStudy 代码
@@ -159,6 +157,40 @@ jobs:
           go run ./cmd/dbinit
           go run ./cmd/dbseed
 
+      - name: 解析学习通测试凭据
+        # 机密格式：username=<手机号>&password=<口令>&courseId=<课程>&classId=<班级>
+        # CX_STUDENT 供「绑定 / 签到」真机用例；CX_TEACHER 供教师侧发签到用例。
+        # 两个机密都带 courseId/classId 时以 CX_STUDENT 为准（后解析者覆盖）。
+        env:
+          CX_STUDENT_RAW: ${{ secrets.CX_STUDENT }}
+          CX_TEACHER_RAW: ${{ secrets.CX_TEACHER }}
+        run: |
+          set -euo pipefail
+          parse() {
+            local scope="$1"
+            local raw="$2"
+            if [ -z "$raw" ]; then
+              return 0
+            fi
+            printf '%s' "$raw" | tr '&' '\n' | while IFS= read -r pair; do
+              if [ -z "$pair" ]; then
+                continue
+              fi
+              key="${pair%%=*}"
+              value="${pair#*=}"
+              if [ "$key" = "$pair" ]; then
+                continue
+              fi
+              case "$key" in
+                username) printf '%s\n' "${scope}_USERNAME=$value" >> "$GITHUB_ENV"; printf '::add-mask::%s\n' "$value" ;;
+                password) printf '%s\n' "${scope}_PASSWORD=$value" >> "$GITHUB_ENV"; printf '::add-mask::%s\n' "$value" ;;
+                courseId) printf '%s\n' "E2E_COURSE_ID=$value" >> "$GITHUB_ENV" ;;
+                classId) printf '%s\n' "E2E_CLASS_ID=$value" >> "$GITHUB_ENV" ;;
+              esac
+            done
+          }
+          parse CX_TEACHER "$CX_TEACHER_RAW"
+          parse CX "$CX_STUDENT_RAW"
       - name: 单元测试（含表结构不变量与分层边界）
         run: go test ./... -v
 
@@ -205,9 +237,7 @@ jobs:
       INTERNAL_TOKEN: test-admin-token
       MAIN_APPID: wx-e2e-test-appid
       E2E_BASE_URL: http://127.0.0.1:8000
-      # 真机学习通账号：注入后在线用例才会执行（缺失时用例自行 skip，不会伪装通过）
-      CX_USERNAME: ${{ secrets.CX_USERNAME }}
-      CX_PASSWORD: ${{ secrets.CX_PASSWORD }}
+      # 真机学习通账号由下面「解析学习通测试凭据」步骤从 CX_STUDENT / CX_TEACHER 解析后写入 GITHUB_ENV
 
     steps:
       - name: 签出 MisakaStudy 代码
@@ -223,6 +253,40 @@ jobs:
           go-version: '1.27'
           cache-dependency-path: server/go.sum
 
+      - name: 解析学习通测试凭据
+        # 机密格式：username=<手机号>&password=<口令>&courseId=<课程>&classId=<班级>
+        # CX_STUDENT 供「绑定 / 签到」真机用例；CX_TEACHER 供教师侧发签到用例。
+        # 两个机密都带 courseId/classId 时以 CX_STUDENT 为准（后解析者覆盖）。
+        env:
+          CX_STUDENT_RAW: ${{ secrets.CX_STUDENT }}
+          CX_TEACHER_RAW: ${{ secrets.CX_TEACHER }}
+        run: |
+          set -euo pipefail
+          parse() {
+            local scope="$1"
+            local raw="$2"
+            if [ -z "$raw" ]; then
+              return 0
+            fi
+            printf '%s' "$raw" | tr '&' '\n' | while IFS= read -r pair; do
+              if [ -z "$pair" ]; then
+                continue
+              fi
+              key="${pair%%=*}"
+              value="${pair#*=}"
+              if [ "$key" = "$pair" ]; then
+                continue
+              fi
+              case "$key" in
+                username) printf '%s\n' "${scope}_USERNAME=$value" >> "$GITHUB_ENV"; printf '::add-mask::%s\n' "$value" ;;
+                password) printf '%s\n' "${scope}_PASSWORD=$value" >> "$GITHUB_ENV"; printf '::add-mask::%s\n' "$value" ;;
+                courseId) printf '%s\n' "E2E_COURSE_ID=$value" >> "$GITHUB_ENV" ;;
+                classId) printf '%s\n' "E2E_CLASS_ID=$value" >> "$GITHUB_ENV" ;;
+              esac
+            done
+          }
+          parse CX_TEACHER "$CX_TEACHER_RAW"
+          parse CX "$CX_STUDENT_RAW"
       - name: 运行端到端测试
         # 测试自行完成：起假上游（微信 / 超星 / QQ，不触网）→ 建表与种子 → 编译并拉起真实
         # 服务端进程（随机端口）→ 跑完全部接口用例 → 收尾。因此这里不需要预先启动服务，
