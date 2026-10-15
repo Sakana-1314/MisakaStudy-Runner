@@ -201,7 +201,7 @@ jobs:
         run: |
           set -euo pipefail
           go test -count=1 -coverpkg=./... -coverprofile=cover.out ./...
-          go run ./cmd/covergate -profile cover.out -baseline scripts/coverage-baseline.txt -min 99
+          go run ./cmd/covergate -profile cover.out -baseline coverage-baseline.txt -min 99
 
   server-e2e:
     name: 服务端端到端测试
