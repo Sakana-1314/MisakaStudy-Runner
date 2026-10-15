@@ -90,8 +90,8 @@ jobs:
       - name: 启动后端服务
         run: |
           go build -o /tmp/misaka-server ./cmd/server
+          # 服务在 /tmp/e2e-run 下启动：logs/ 等运行期文件写到可写目录，不污染检出目录。
           cd /tmp && mkdir -p e2e-run && cd e2e-run
-          cp -r "$GITHUB_WORKSPACE/server/templates" .
           nohup /tmp/misaka-server > /tmp/e2e-run/server.log 2>&1 &
           echo $! > /tmp/server.pid
           cd "$GITHUB_WORKSPACE/server"
