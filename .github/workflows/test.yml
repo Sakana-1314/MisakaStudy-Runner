@@ -384,22 +384,24 @@ jobs:
           cache-dependency-path: server/go.sum
 
       - name: 模糊测试安全解析入口
-        # 这些函数（令牌、签名值、clientId）的输入全部来自网络，最重要的不变量是
+        # 这些函数（令牌、签名值、cookie、clientId）的输入全部来自网络，最重要的不变量是
         # 「任意字节串都不得 panic」与「未正确签名的输入绝不被接受」。
-        # 时长按目标数控制，保证门禁总耗时可控。
+        # 目标包与目标名都从代码里现扫、不写死路径与函数名：主仓库搬包、改名或新增 fuzz
+        # 目标时，这里不会再因为「找不到包 / 找不到目标」而红。时长按目标数控制，靠
+        # `-fuzztime` 固定单个目标的时长，门禁总耗时可控。
         run: |
           set -euo pipefail
-          targets=(
-            FuzzVerifyShortSignTokens
-            FuzzDecodeTokens
-            FuzzVerifySignatureAndChallenge
-            FuzzDecodeAndDecrypt
-            FuzzDecryptClientInfo
-          )
-          for target in "${targets[@]}"; do
-            echo "::group::${target}"
-            go test -run '^$' -fuzz "^${target}$" -fuzztime 45s ./internal/security/
-            echo "::endgroup::"
+          dirs="$(grep -rl --include='*_test.go' -E '^func Fuzz' internal || true)"
+          if [ -z "$dirs" ]; then
+            echo "internal/ 下没有模糊测试目标，跳过"
+            exit 0
+          fi
+          for dir in $(printf '%s\n' "$dirs" | xargs -n1 dirname | sort -u); do
+            for target in $(go test -list '^Fuzz' "./${dir}" | grep '^Fuzz' || true); do
+              echo "::group::${dir} ${target}"
+              go test -run '^$' -fuzz "^${target}$" -fuzztime 45s "./${dir}"
+              echo "::endgroup::"
+            done
           done
 
       - name: 归档失败语料
@@ -407,7 +409,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: fuzz-corpus-server
-          path: server/internal/security/testdata/fuzz/
+          # 语料始终落在「发现目标的那个包」的 testdata/fuzz/ 下，因此按通配收集
+          path: server/internal/**/testdata/fuzz/
           if-no-files-found: ignore
 
   edge-apis-tests:
