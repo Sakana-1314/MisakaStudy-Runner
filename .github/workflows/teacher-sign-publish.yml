@@ -1,0 +1,75 @@
+name: 每周六自动发签到
+
+# 每周六 06:00（北京时间，UTC+8）= 每周五 22:00 UTC。
+# 只执行 MisakaStudy 的教师侧发签到 live 用例 TestLiveTeacherPublishAllSignTypes：
+#   普通（拍照+防作弊验证码）、手势、手势+指定地点、位置、位置+指定地点+人脸、
+#   二维码+指定地点+人脸+静态码。
+# 需要 CX_TEACHER 机密（格式 username=...&password=...&courseId=...&classId=...）。
+# 手动触发时可选 ref（默认 next）。
+on:
+  schedule:
+    - cron: '0 22 * * 5'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 要运行的 MisakaStudy 分支或 commit（默认 next）
+        required: false
+        default: 'next'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: teacher-sign-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: 发布六种教师签到
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - name: 签出 MisakaStudy 代码
+        uses: actions/checkout@v4
+        with:
+          repository: Sakana-1314/MisakaStudy
+          ref: ${{ github.event.inputs.ref || 'next' }}
+          token: ${{ secrets.PAT }}
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          cache-dependency-path: server/go.sum
+
+      - name: 校验教师凭据
+        env:
+          CX_TEACHER: ${{ secrets.CX_TEACHER }}
+        run: |
+          if [ -z "$CX_TEACHER" ]; then
+            echo "缺少 CX_TEACHER 机密，无法发布签到" >&2
+            exit 1
+          fi
+
+      - name: 发布签到
+        env:
+          LIVE_UPSTREAM: '1'
+          CX_TEACHER: ${{ secrets.CX_TEACHER }}
+          TZ: Asia/Shanghai
+        run: |
+          set -o pipefail
+          go test ./tests/live/ -run TestLiveTeacherPublishAllSignTypes -v -count=1 2>&1 | tee publish.log
+
+      - name: 输出二维码链接
+        if: always()
+        run: |
+          if [ -f publish.log ]; then
+            {
+              echo '### 本次发布的签到'
+              grep -E '本次共发布|activeId=|二维码签到链接' publish.log || true
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
