@@ -35,27 +35,38 @@ jobs:
           set -euo pipefail
 
           cutoff="$(( $(date -u +%s) - GRACE_MINUTES * 60 ))"
+          total_deleted=0
+          total_failed=0
+
           # 不能用 status=completed 过滤：GitHub 对该过滤最多只回 1000 条，旧记录会永远删不到。
-          # 改为全量分页拉取，再在 jq 里筛 status/时间。
-          ids="$(gh api --paginate "repos/$REPO/actions/runs?per_page=100" \
-            --jq ".workflow_runs[] | select(.status == \"completed\") | select(.id != $CURRENT_RUN_ID) | select((.updated_at | fromdateiso8601) < $cutoff) | .id")"
+          # 全量分页拉取后在 jq 里筛 status/时间；分页期间有新 run 插入时可能错位，
+          # 因此多跑几轮，并用 sort -u 去重。
+          for pass in 1 2 3; do
+            ids="$(gh api --paginate "repos/$REPO/actions/runs?per_page=100" \
+              --jq ".workflow_runs[] | select(.status == \"completed\") | select(.id != $CURRENT_RUN_ID) | select((.updated_at | fromdateiso8601) < $cutoff) | .id" \
+              | sort -u)"
+            [ -n "$ids" ] || break
 
-          if [ -z "$ids" ]; then
-            echo "没有需要删除的运行记录"
-            exit 0
-          fi
+            deleted=0
+            failed=0
+            for id in $ids; do
+              if gh api -X DELETE "repos/$REPO/actions/runs/$id" >/dev/null 2>&1; then
+                deleted=$((deleted + 1))
+              elif ! gh api "repos/$REPO/actions/runs/$id" >/dev/null 2>&1; then
+                # 已被并发删除（404）视为成功
+                deleted=$((deleted + 1))
+              else
+                failed=$((failed + 1))
+              fi
+              # 写接口按 GitHub 建议放慢，避免触发二级限流
+              sleep 1
+            done
 
-          deleted=0
-          failed=0
-          for id in $ids; do
-            if gh api -X DELETE "repos/$REPO/actions/runs/$id" >/dev/null 2>&1; then
-              deleted=$((deleted + 1))
-            else
-              failed=$((failed + 1))
-            fi
-            # 写接口按 GitHub 建议放慢，避免触发二级限流
-            sleep 1
+            echo "第 $pass 轮：删除 $deleted 条，失败 $failed 条"
+            total_deleted=$((total_deleted + deleted))
+            total_failed=$((total_failed + failed))
+            [ "$deleted" -gt 0 ] || break
           done
 
-          echo "清理完成：删除 $deleted 条，失败 $failed 条"
-          [ "$failed" -eq 0 ] || exit 1
+          echo "清理完成：删除 $total_deleted 条，失败 $total_failed 条"
+          [ "$total_failed" -eq 0 ] || exit 1
