@@ -35,9 +35,10 @@ jobs:
           set -euo pipefail
 
           cutoff="$(( $(date -u +%s) - GRACE_MINUTES * 60 ))"
-          # 一次取全量 eligible id：分页拉取后在 jq 里过滤，避免只看第一页漏掉旧记录。
-          ids="$(gh api --paginate "repos/$REPO/actions/runs?per_page=100&status=completed" \
-            --jq ".workflow_runs[] | select(.id != $CURRENT_RUN_ID) | select((.updated_at | fromdateiso8601) < $cutoff) | .id")"
+          # 不能用 status=completed 过滤：GitHub 对该过滤最多只回 1000 条，旧记录会永远删不到。
+          # 改为全量分页拉取，再在 jq 里筛 status/时间。
+          ids="$(gh api --paginate "repos/$REPO/actions/runs?per_page=100" \
+            --jq ".workflow_runs[] | select(.status == \"completed\") | select(.id != $CURRENT_RUN_ID) | select((.updated_at | fromdateiso8601) < $cutoff) | .id")"
 
           if [ -z "$ids" ]; then
             echo "没有需要删除的运行记录"
