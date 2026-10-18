@@ -3,7 +3,7 @@ name: 同步 OpenAPI 到 Apifox
 # 触发方式：
 #   1) 自动：MisakaStudy（私有侧）push next 后经 repository_dispatch(misaka_push) 派发；
 #      仅当本次 push 改动了 server/openapi.yaml 才导入，保证 Apifox 主分支与主干规范一致。
-#   2) 手动：本仓库 Actions 页「Run workflow」，默认签出 next 并强制导入一次。
+#   2) 手动：本仓库 Actions 页「Run workflow」，签出 MisakaStudy 默认分支（next）并强制导入一次。
 #
 # 导入走 Apifox 开放 API（POST /v1/projects/{projectId}/import-openapi），不用 apifox-cli：
 # CLI 属「自动化调用方」，写主分支会被 Apifox 的 AI 权限保护拦截（Automation caller branch required），开放 API 无此限制。
@@ -17,12 +17,6 @@ name: 同步 OpenAPI 到 Apifox
 
 on:
   workflow_dispatch:
-    inputs:
-      ref:
-        description: 要同步的 MisakaStudy 分支或 commit（默认 next）
-        required: false
-        default: "next"
-        type: string
   repository_dispatch:
     types: [misaka_push]
 
@@ -45,7 +39,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Sakana-1314/MisakaStudy
-          ref: ${{ github.event.client_payload.ref || inputs.ref }}
+          ref: ${{ github.event.client_payload.ref }}
           token: ${{ secrets.PAT }}
 
       - name: 判断是否需要同步

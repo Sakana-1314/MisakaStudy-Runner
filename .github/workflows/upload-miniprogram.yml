@@ -1,7 +1,8 @@
 name: 小程序代码上传
 
 # 触发方式：
-#   1) 手动：本仓库 Actions 页「Run workflow」，把源码直传为体验版（版本号 v4.YYYY.MM.DD-hotfix.N，同日自增不重复）。
+#   1) 手动：本仓库 Actions 页「Run workflow」，签出 MisakaStudy 默认分支（next），
+#      把源码直传为体验版（版本号 v4.YYYY.MM.DD-hotfix.N，同日自增不重复）。
 #   2) 自动：MisakaStudy（私有侧）在 trigger.yml 判断 miniprogram/** 是否改动，
 #      命中后经 repository_dispatch(misaka_miniprogram) 派发——Runner 收到请求即始终执行上传，
 #      不再自行过滤路径。
@@ -22,11 +23,6 @@ name: 小程序代码上传
 on:
   workflow_dispatch:
     inputs:
-      ref:
-        description: 要上传的 MisakaStudy 分支或 commit（默认 next）
-        required: false
-        default: "next"
-        type: string
       version:
         description: 版本号（留空则自动用 v4.<当天日期>-hotfix.N，同日自增不重复）
         required: false
@@ -58,7 +54,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Sakana-1314/MisakaStudy
-          ref: ${{ github.event.client_payload.ref || inputs.ref }}
+          ref: ${{ github.event.client_payload.ref }}
           token: ${{ secrets.PAT }}
 
       - name: 安装 Node

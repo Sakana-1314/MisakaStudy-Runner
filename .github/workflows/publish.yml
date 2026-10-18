@@ -3,18 +3,13 @@ name: 发布脚本执行
 # 触发方式：仅支持本仓库 Actions 页「Run workflow」手动运行。
 # 语义：仓库机密 PUBLISH 存有一段 bash 发布脚本；本工作流把该机密落盘后执行。
 # 说明：
-#   - 签出私有 MisakaStudy 代码（经 secrets.PAT），脚本工作目录即其仓库根。
+#   - 签出私有 MisakaStudy 代码默认分支（经 secrets.PAT），脚本工作目录即其仓库根。
 #   - PUBLISH 内容属于机密：只经环境变量透传给步骤，绝不明文写入命令/日志。
 #   - 安全红线（公开仓库）：仅允许 workflow_dispatch，不配置 push / pull_request 触发。
 
 on:
   workflow_dispatch:
     inputs:
-      ref:
-        description: 要签出的 MisakaStudy 分支或 commit
-        required: false
-        default: "next"
-        type: string
       args:
         description: 追加传给 PUBLISH 脚本的位置参数（可空）
         required: false
@@ -35,13 +30,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Sakana-1314/MisakaStudy
-          ref: ${{ inputs.ref }}
           token: ${{ secrets.PAT }}
 
       - name: 运行 PUBLISH 脚本
         env:
           PUBLISH_SCRIPT: ${{ secrets.PUBLISH }}
-          PUBLISH_REF: ${{ inputs.ref }}
           PUBLISH_ARGS: ${{ inputs.args }}
           GH_TOKEN: ${{ secrets.PAT }}
         run: |
@@ -55,6 +48,9 @@ jobs:
           printf '%s\n' "$PUBLISH_SCRIPT" | sed 's/\r$//' > "$SCRIPT"
           chmod +x "$SCRIPT"
 
+          # 工作区已签出 MisakaStudy 默认分支，把实际分支名透传给脚本（detached 时退回短 SHA）
+          PUBLISH_REF="$(git symbolic-ref --short -q HEAD || git rev-parse --short HEAD)"
+          export PUBLISH_REF
           echo "工作区为 MisakaStudy@${PUBLISH_REF}，开始执行 PUBLISH 脚本…"
 
           if [ -n "$PUBLISH_ARGS" ]; then
