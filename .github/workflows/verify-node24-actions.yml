@@ -19,12 +19,18 @@ jobs:
           token: ${{ secrets.PAT }}
           fetch-depth: 2
 
+      - name: 计算基准提交
+        id: revs
+        run: |
+          echo "base=$(git rev-parse HEAD~1)" >> "$GITHUB_OUTPUT"
+          echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: 检测变更路径（paths-filter v4）
         id: filter
         uses: dorny/paths-filter@v4
         with:
-          base: HEAD~1
-          ref: HEAD
+          base: ${{ steps.revs.outputs.base }}
+          ref: ${{ steps.revs.outputs.ref }}
           filters: |
             server:
               - 'server/**'
