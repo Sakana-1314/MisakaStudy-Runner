@@ -2,11 +2,12 @@ name: 每周六自动发签到
 
 # 每周六 06:00（北京时间，UTC+8）= 每周五 22:00 UTC。
 # 执行 MisakaStudy 的教师侧发签到 live 用例 TestLiveTeacherPublishAllSignTypes：
-#   普通（拍照+防作弊验证码）、手势、手势+指定地点、位置、位置+指定地点+人脸、
+#   普通（拍照+滑块验证）、手势、手势+指定地点、位置、位置+指定地点+人脸、
 #   二维码+指定地点+人脸+静态码。
 # 需要 CX_TEACHER 机密（格式 courseId=...&username=...&password=...；classId 可选）。
 # 自动触发（schedule）：CX_SIGN_TRIGGER=auto，删除班级内全部活动，发布后移入“自动发布”；
 # 手动触发（workflow_dispatch）：CX_SIGN_TRIGGER=manual，只删“手动发布”分组里的签到。
+# 两种模式都会在每个签到发布成功后用教师账号自签一次，结果写入运行摘要。
 # 定时与手动触发都签出 MisakaStudy 默认分支（next）。
 on:
   schedule:
@@ -50,7 +51,7 @@ jobs:
             exit 1
           fi
 
-      - name: 发布签到
+      - name: 发布签到并自签
         env:
           LIVE_UPSTREAM: '1'
           CX_TEACHER: ${{ secrets.CX_TEACHER }}
@@ -70,11 +71,14 @@ jobs:
       - name: 输出发布摘要
         if: always()
         run: |
-          # 只允许输出签到类型与二维码；不得回显 publish.log 原文、班级或源码行号。
+          # 只允许输出签到类型、自签计数与二维码；不得回显 publish.log 原文、班级或源码行号。
           if [ -f publish.log ]; then
             {
               echo '### 本次发布的签到类型'
               sed -nE 's/.*[0-9]+\. (.*) \| activeId=.*/\1/p' publish.log | awk '!seen[$0]++'
+              echo
+              echo '### 自签结果'
+              sed -nE 's/.*自签汇总：(.*)/- \1/p' publish.log | awk '!seen[$0]++'
               echo
               echo '### 签到二维码'
               sed -nE 's/.*二维码签到链接（点开即可扫码）：(https:[^[:space:]]+).*/\1/p' publish.log \
