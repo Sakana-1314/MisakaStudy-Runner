@@ -99,7 +99,7 @@ jobs:
       - name: 等待服务就绪
         run: |
           for i in $(seq 1 30); do
-            if curl -sf http://127.0.0.1:8000/api/public/state > /dev/null; then
+            if curl -sf http://127.0.0.1:8000/api/status > /dev/null; then
               echo "服务已就绪"
               exit 0
             fi
