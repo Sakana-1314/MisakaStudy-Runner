@@ -14,7 +14,7 @@ jobs:
       server: ${{ steps.filter.outputs.server == 'true' }}
     steps:
       - name: 签出 MisakaStudy 代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: Sakana-1314/MisakaStudy
           ref: ${{ github.event.client_payload.ref }}
@@ -22,7 +22,7 @@ jobs:
 
       - name: 检测变更路径
         id: filter
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           base: ${{ github.event.client_payload.before }}
           ref: ${{ github.event.client_payload.ref }}
@@ -70,14 +70,14 @@ jobs:
 
     steps:
       - name: 签出 MisakaStudy 代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: Sakana-1314/MisakaStudy
           ref: ${{ github.event.client_payload.ref }}
           token: ${{ secrets.PAT }}
 
       - name: 安装 Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: '1.27'
           cache-dependency-path: server/go.sum
@@ -148,7 +148,7 @@ jobs:
 
       - name: 上传服务端日志
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: server-logs-e2e
           path: |
