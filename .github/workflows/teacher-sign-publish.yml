@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   publish:
-    name: 发布六种教师签到
+    name: 发布签到
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
@@ -51,7 +51,7 @@ jobs:
             exit 1
           fi
 
-      - name: 发布签到并自签
+      - name: 发布并自签
         env:
           LIVE_UPSTREAM: '1'
           CX_TEACHER: ${{ secrets.CX_TEACHER }}
@@ -68,7 +68,7 @@ jobs:
             exit "$status"
           fi
 
-      - name: 输出发布摘要（表格）
+      - name: 生成发布摘要
         if: always()
         run: |
           # 只输出结构化摘要里的班级名、签到名称、自签结果和二维码图片；

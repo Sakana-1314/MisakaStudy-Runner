@@ -1,4 +1,4 @@
-name: 发布脚本执行
+name: 发布
 
 # 触发方式：仅支持本仓库 Actions 页「Run workflow」手动运行。
 # 语义：仓库机密 PUBLISH 存有一段 bash 发布脚本；本工作流把该机密落盘后执行。
@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       args:
-        description: 追加传给 PUBLISH 脚本的位置参数（可空）
+        description: 追加传给发布脚本的位置参数（可空）
         required: false
         default: ""
         type: string
@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   publish:
-    name: 执行 PUBLISH 脚本
+    name: 执行发布脚本
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -32,7 +32,7 @@ jobs:
           repository: Sakana-1314/MisakaStudy
           token: ${{ secrets.PAT }}
 
-      - name: 运行 PUBLISH 脚本
+      - name: 运行发布脚本
         env:
           PUBLISH_SCRIPT: ${{ secrets.PUBLISH }}
           PUBLISH_ARGS: ${{ inputs.args }}
@@ -51,7 +51,7 @@ jobs:
           # 工作区已签出 MisakaStudy 默认分支，把实际分支名透传给脚本（detached 时退回短 SHA）
           PUBLISH_REF="$(git symbolic-ref --short -q HEAD || git rev-parse --short HEAD)"
           export PUBLISH_REF
-          echo "工作区为 MisakaStudy@${PUBLISH_REF}，开始执行 PUBLISH 脚本…"
+          echo "工作区为 MisakaStudy@${PUBLISH_REF}，开始执行发布脚本…"
 
           if [ -n "$PUBLISH_ARGS" ]; then
             read -r -a ARGV <<< "$PUBLISH_ARGS"
