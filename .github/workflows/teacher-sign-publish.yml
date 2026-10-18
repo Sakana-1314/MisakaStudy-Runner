@@ -1,10 +1,12 @@
 name: 每周六自动发签到
 
 # 每周六 06:00（北京时间，UTC+8）= 每周五 22:00 UTC。
-# 只执行 MisakaStudy 的教师侧发签到 live 用例 TestLiveTeacherPublishAllSignTypes：
+# 执行 MisakaStudy 的教师侧发签到 live 用例 TestLiveTeacherPublishAllSignTypes：
 #   普通（拍照+防作弊验证码）、手势、手势+指定地点、位置、位置+指定地点+人脸、
 #   二维码+指定地点+人脸+静态码。
-# 需要 CX_TEACHER 机密（格式 username=...&password=...&courseId=...&classId=...）。
+# 需要 CX_TEACHER 机密（格式 courseId=...&username=...&password=...；classId 可选）。
+# 自动触发（schedule）：CX_SIGN_TRIGGER=auto，删除班级内全部活动，发布后移入“自动发布”；
+# 手动触发（workflow_dispatch）：CX_SIGN_TRIGGER=manual，只删“手动发布”分组里的签到。
 # 手动触发时可选 ref（默认 next）。
 on:
   schedule:
@@ -59,17 +61,18 @@ jobs:
         env:
           LIVE_UPSTREAM: '1'
           CX_TEACHER: ${{ secrets.CX_TEACHER }}
+          CX_SIGN_TRIGGER: ${{ github.event_name == 'schedule' && 'auto' || 'manual' }}
           TZ: Asia/Shanghai
         run: |
           set -o pipefail
           go test ./tests/live/ -run TestLiveTeacherPublishAllSignTypes -v -count=1 2>&1 | tee publish.log
 
-      - name: 输出二维码链接
+      - name: 输出发布摘要
         if: always()
         run: |
           if [ -f publish.log ]; then
             {
               echo '### 本次发布的签到'
-              grep -E '本次共发布|activeId=|二维码签到链接' publish.log || true
+              grep -E '本次共发布|activeId=|二维码签到链接|自签' publish.log || true
             } >> "$GITHUB_STEP_SUMMARY"
           fi
