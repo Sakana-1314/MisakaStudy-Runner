@@ -2,6 +2,9 @@ name: 验证 Node.js 24 action
 
 # 临时工作流：仅用于验证 action 升级后的真实运行情况，验证完成即删除。
 on:
+  push:
+    branches:
+      - chore/node24-actions
   workflow_dispatch:
 
 jobs:
