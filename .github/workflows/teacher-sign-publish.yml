@@ -57,15 +57,28 @@ jobs:
           CX_SIGN_TRIGGER: ${{ github.event_name == 'schedule' && 'auto' || 'manual' }}
           TZ: Asia/Shanghai
         run: |
-          set -o pipefail
-          go test ./tests/live/ -run TestLiveTeacherPublishAllSignTypes -v -count=1 2>&1 | tee publish.log
+          # 本仓库是公开仓库：完整测试输出里有班级名、classId、activeId、自签响应
+          # 与源码行号，只写入 runner 本地临时文件，禁止回显到 Actions 日志。
+          if go test ./tests/live/ -run TestLiveTeacherPublishAllSignTypes -v -count=1 > publish.log 2>&1; then
+            echo "发布签到流程完成"
+          else
+            status=$?
+            echo "::error::发布签到失败；完整日志含账号/班级信息，已丢弃，不写入公开日志"
+            exit "$status"
+          fi
 
       - name: 输出发布摘要
         if: always()
         run: |
+          # 只允许输出签到类型与二维码；不得回显 publish.log 原文、班级或源码行号。
           if [ -f publish.log ]; then
             {
-              echo '### 本次发布的签到'
-              grep -E '本次共发布|activeId=|二维码签到链接|自签' publish.log || true
+              echo '### 本次发布的签到类型'
+              sed -nE 's/.*[0-9]+\. (.*) \| activeId=.*/\1/p' publish.log | awk '!seen[$0]++'
+              echo
+              echo '### 签到二维码'
+              sed -nE 's/.*二维码签到链接（点开即可扫码）：(https:[^[:space:]]+).*/\1/p' publish.log \
+                | awk '!seen[$0]++ { n++; print "![签到二维码 " n "](" $0 ")" }'
             } >> "$GITHUB_STEP_SUMMARY"
+            rm -f publish.log
           fi
