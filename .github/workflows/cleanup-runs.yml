@@ -11,6 +11,12 @@ on:
   schedule:
     - cron: '0 22 * * *'
   workflow_dispatch:
+    inputs:
+      grace_minutes:
+        description: 只删除完成超过多少分钟的运行（默认 15；填 0 可立即删除刚结束的）
+        required: false
+        default: '15'
+        type: string
 
 permissions:
   actions: write
@@ -30,9 +36,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           CURRENT_RUN_ID: ${{ github.run_id }}
-          GRACE_MINUTES: '15'
+          GRACE_MINUTES: ${{ github.event.inputs.grace_minutes || '15' }}
         run: |
           set -euo pipefail
+
+          case "$GRACE_MINUTES" in
+            ''|*[!0-9]*) echo "::error::grace_minutes 必须是非负整数"; exit 1 ;;
+          esac
 
           cutoff="$(( $(date -u +%s) - GRACE_MINUTES * 60 ))"
           total_deleted=0
