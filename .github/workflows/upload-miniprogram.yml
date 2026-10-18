@@ -2,7 +2,7 @@ name: 小程序代码上传
 
 # 触发方式：
 #   1) 手动：本仓库 Actions 页「Run workflow」，签出 MisakaStudy 默认分支（next），
-#      把源码直传为体验版（版本号 v4.YYYY.MM.DD-hotfix.N，同日自增不重复）。
+#      把源码上传为体验版（版本号 v4.YYYY.MM.DD-hotfix.N，同日自增不重复）。
 #   2) 自动：MisakaStudy（私有侧）在 trigger.yml 判断 miniprogram/** 是否改动，
 #      命中后经 repository_dispatch(misaka_miniprogram) 派发——Runner 收到请求即始终执行上传，
 #      不再自行过滤路径。
@@ -11,7 +11,7 @@ name: 小程序代码上传
 #      - PR 事件（关闭未合并，closed+!merged）：以完全相同的 commit 再传一次「PR #<编号>（已关闭）」。
 #      - push 事件（PR 合并落库后 next 的主分支提交）：版本号 v4.YYYY.MM.DD-hotfix.N（读源码仓库最后一次 tag 同日期自增），
 #        版本描述取该 commit 的标题，robot 1。
-# 所有直传都只上传为开发版本，不会提交审核；PR 上传的版本描述统一写「由 GitHub Actions 自动上传！」。
+# 所有上传都只上传为开发版本，不会提交审核；PR 上传的版本描述统一写「由 GitHub Actions 自动上传！」。
 # 上传前调用 miniprogram/scripts/inject-build-info.js，把版本号与构建时间写进被上传代码的
 # utils/config.ci.js——开发版/体验版无法从 wx.getAccountInfoSync 取到线上版本号，只能这样注入。
 #
@@ -47,7 +47,7 @@ concurrency:
 
 jobs:
   upload:
-    name: 直传小程序代码
+    name: 上传小程序
     runs-on: ubuntu-24.04
     steps:
       - name: 签出 MisakaStudy 代码
