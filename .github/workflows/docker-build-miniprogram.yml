@@ -2,6 +2,9 @@ name: 小程序端镜像构建
 
 # 由 MisakaStudy 仓库 trigger.yml 经 repository_dispatch(misaka_push) 触发，仅在 miniprogram/** 变更时构建；
 # 也可在 Runner 仓库手动触发（workflow_dispatch，构建本镜像）。
+#
+# 镜像只包含 ci-client 与它的运行依赖：小程序代码由 upload-miniprogram.yml 打进加密包并按版本发布，
+# 上传节点在运行时按 targetVersion 拉取，因此镜像不再随小程序代码版本重建，也没有 VERSION 构建参数。
 on:
   repository_dispatch:
     types: [misaka_push]
@@ -62,21 +65,6 @@ jobs:
           username: ${{ secrets.TENCENT_REGISTRY_USERNAME }}
           password: ${{ secrets.TENCENT_REGISTRY_PASSWORD }}
 
-      - name: 计算版本号并创建 tag
-        id: meta
-        # 版本号 v4.YYYY.MM.DD-hotfix.N：读取 MisakaStudy 源码仓库最后一次的 tag 同日期自增，
-        # 并创建同名 tag 作为下次自增依据（ci-client 上传小程序代码时携带此版本号）。
-        # 镜像 tag 仍为固定 chaoxing:miniprogram，仅上传版本号参与自增。
-        env:
-          GH_TOKEN: ${{ secrets.PAT }}
-        run: |
-          set -euo pipefail
-          # 版本号为空（如并发创建 tag 冲突且重试耗尽）时直接失败，禁止发布无版本号的脏镜像
-          version="$(miniprogram/scripts/next-version.sh Sakana-1314/MisakaStudy)"
-          test -n "$version"
-          echo "timestamp=$(date +%s)" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
       - name: 构建并推送
         uses: docker/build-push-action@v7
         with:
@@ -85,8 +73,5 @@ jobs:
           push: true
           tags: sgccr.ccs.tencentyun.com/misaka-network/chaoxing:miniprogram
           platforms: linux/amd64,linux/arm64
-          build-args: |
-            VERSION=${{ steps.meta.outputs.version }}
-            TIMESTAMP=${{ steps.meta.outputs.timestamp }}
           cache-from: type=gha,scope=miniprogram
           cache-to: type=gha,mode=max,scope=miniprogram

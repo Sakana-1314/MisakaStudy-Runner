@@ -15,6 +15,11 @@ name: 小程序代码上传
 # 上传前调用 miniprogram/scripts/inject-build-info.js，把版本号与构建时间写进被上传代码的
 # utils/config.ci.js——开发版/体验版无法从 wx.getAccountInfoSync 取到线上版本号，只能这样注入。
 #
+# 除直传外，本工作流还会用 miniprogram/scripts/build-ci-package.sh 完成 npm 构建、打包并用
+# 仓库机密 ZIP_PASSWORD 加密，发布到本仓库的 Release（tag 为 mp-<版本号 sha256 前 16 位>，
+# 资产名 miniprogram.tar.gz.enc）。上传节点里的 ci-client 按服务端下发的 targetVersion 拉取它，
+# 节点侧不再安装依赖或构建。
+#
 # appid 与代码上传密钥取自检出的 MisakaStudy 仓库自身：
 #   - appid：miniprogram/project.config.json 的 appid 字段
 #   - 密钥：miniprogram/.private/private.<appid>.key
@@ -49,6 +54,9 @@ jobs:
   upload:
     name: 上传小程序
     runs-on: ubuntu-24.04
+    # 发布代码包需要创建 Release 与上传资产；直传部分仍用 PAT 回写 MisakaStudy。
+    permissions:
+      contents: write
     steps:
       - name: 签出 MisakaStudy 代码
         uses: actions/checkout@v7
@@ -66,18 +74,8 @@ jobs:
         working-directory: miniprogram
         run: npm install --no-audit --no-fund --include=dev
 
-      - name: 构建 miniprogram_npm
-        working-directory: miniprogram
-        run: |
-          set -euo pipefail
-          npx --no-install miniprogram-ci pack-npm \
-            --pp ./ \
-            --pkp .private/private.wxb42fe32e6e071916.key \
-            --appid wxb42fe32e6e071916
-
-      - name: 上传小程序代码
-        id: run_upload
-        working-directory: miniprogram
+      - name: 计算版本号
+        id: meta
         env:
           GH_TOKEN: ${{ secrets.PAT }}
           EVENT: ${{ github.event_name }}
@@ -86,13 +84,8 @@ jobs:
           VERSION_INPUT: ${{ inputs.version }}
           ROBOT_INPUT: ${{ inputs.robot }}
           DESC_INPUT: ${{ inputs.desc }}
-          BASE_URL: ${{ secrets.BASE_URL }}
         run: |
           set -euo pipefail
-          APPID="$(jq -r '.appid' project.config.json)"
-          KEY_PATH=".private/private.${APPID}.key"
-          [ -f "$KEY_PATH" ] || { echo "未找到代码上传密钥 $KEY_PATH"; exit 1; }
-
           if [ "$EVENT" = "repository_dispatch" ]; then
             if [ "$PAYLOAD_EVENT" = "pull_request" ]; then
               # 检出的仍是 PR head commit，无论合并/关闭/开启代码内容完全一致
@@ -126,6 +119,49 @@ jobs:
             ROBOT="$ROBOT_INPUT"
             DESC="$DESC_INPUT"
           fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "robot=$ROBOT" >> "$GITHUB_OUTPUT"
+          echo "desc=$DESC" >> "$GITHUB_OUTPUT"
+
+      - name: 构建并发布代码包
+        working-directory: miniprogram
+        env:
+          ZIP_PASSWORD: ${{ secrets.ZIP_PASSWORD }}
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          [ -n "$ZIP_PASSWORD" ] || { echo "缺少 ZIP_PASSWORD 机密，无法加密代码包"; exit 1; }
+
+          OUTPUT="${RUNNER_TEMP}/miniprogram.tar.gz.enc"
+          bash scripts/build-ci-package.sh "$VERSION" "$OUTPUT"
+
+          # 与 ci-client.js 的 packageTag 保持同一算法：版本号可能含空格/中文，tag 用摘要
+          TAG="mp-$(printf '%s' "$VERSION" | sha256sum | cut -c1-16)"
+          NOTES="小程序加密代码包；版本 ${VERSION}；构建时间 $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$OUTPUT#miniprogram.tar.gz.enc" --clobber --repo "$REPO"
+            gh release edit "$TAG" --title "$VERSION" --notes "$NOTES" --repo "$REPO"
+          else
+            gh release create "$TAG" "$OUTPUT#miniprogram.tar.gz.enc" \
+              --repo "$REPO" --title "$VERSION" --notes "$NOTES"
+          fi
+          rm -f "$OUTPUT"
+
+      - name: 上传小程序代码
+        working-directory: miniprogram
+        env:
+          BASE_URL: ${{ secrets.BASE_URL }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          ROBOT: ${{ steps.meta.outputs.robot }}
+          DESC: ${{ steps.meta.outputs.desc }}
+        run: |
+          set -euo pipefail
+          APPID="$(jq -r '.appid' project.config.json)"
+          KEY_PATH=".private/private.${APPID}.key"
+          [ -f "$KEY_PATH" ] || { echo "未找到代码上传密钥 $KEY_PATH"; exit 1; }
 
           # BASE_URL 是机密，GitHub 会在日志里打码；未配置时回落「线上」以便一眼看出覆盖没生效
           echo "上传目标 appid=${APPID} version=${VERSION} robot=${ROBOT} baseUrl=${BASE_URL:-线上}"
