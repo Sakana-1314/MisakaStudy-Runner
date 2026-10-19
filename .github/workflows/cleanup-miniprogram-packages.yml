@@ -1,0 +1,60 @@
+name: 清理小程序代码包
+
+# 每天 06:30（北京时间）清理 Runner Release 里的小程序代码包：
+#   - 只保留最近 30 个版本，第 31 个及更旧的删除；
+#   - 单个包超过 30 天删除；
+#   - 历史遗留的 PR 包（标题以「PR #」开头）一律删除（PR 版本不再发布代码包）。
+# 也可在 Actions 页手动触发。
+on:
+  schedule:
+    - cron: '30 22 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: cleanup-miniprogram-packages
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    name: 清理过期代码包
+    runs-on: ubuntu-24.04
+    steps:
+      - name: 删除超过 30 天或超出最近 30 个的版本
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          releases="$(gh release list --repo "$REPO" --limit 1000 --json tagName,createdAt,name)"
+          echo "$releases" | jq -r '
+            [ .[]
+              | select(.tagName | startswith("mp-"))
+            ] as $all
+            | (
+                $all[]
+                | select((.name // "") | startswith("PR #"))
+                | .tagName
+              ),
+              (
+                $all
+                | map(select(((.name // "") | startswith("PR #")) | not))
+                | sort_by(.createdAt)
+                | reverse
+                | to_entries[]
+                | {
+                    tag: .value.tagName,
+                    rank: (.key + 1),
+                    ageDays: ((now - (try (.value.createdAt | fromdateiso8601) catch now)) / 86400 | floor)
+                  }
+                | select(.rank > 30 or .ageDays > 30)
+                | .tag
+              )
+          ' | while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            echo "删除代码包 Release：$tag"
+            gh release delete "$tag" --repo "$REPO" --yes --cleanup-tag
+          done
+          echo "代码包清理完成"

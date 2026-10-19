@@ -17,8 +17,9 @@ name: 小程序代码上传
 #
 # 除直传外，本工作流还会用 miniprogram/scripts/build-ci-package.sh 完成 npm 构建、打包并用
 # 仓库机密 ZIP_PASSWORD 加密，发布到本仓库的 Release（tag 为 mp-<版本号 sha256 前 16 位>，
-# 资产名 miniprogram.tar.gz.enc）。上传节点里的 ci-client 按服务端下发的 targetVersion 拉取它，
+# 资产名 miniprogram.tar.gz）。上传节点里的 ci-client 按服务端下发的 targetVersion 拉取它，
 # 节点侧不再安装依赖或构建。
+# **PR 事件只做直传，不发布代码包**；只有合并后的 push（或手动发版）才发布，供上传节点使用。
 #
 # appid 与代码上传密钥取自检出的 MisakaStudy 仓库自身：
 #   - appid：miniprogram/project.config.json 的 appid 字段
@@ -125,6 +126,8 @@ jobs:
           echo "desc=$DESC" >> "$GITHUB_OUTPUT"
 
       - name: 构建并发布代码包
+        # PR 版本只直传体验版，不发布代码包；合并后的 push 与手动发版才发布。
+        if: github.event_name != 'repository_dispatch' || github.event.client_payload.event_name != 'pull_request'
         working-directory: miniprogram
         env:
           ZIP_PASSWORD: ${{ secrets.ZIP_PASSWORD }}
@@ -135,17 +138,17 @@ jobs:
           set -euo pipefail
           [ -n "$ZIP_PASSWORD" ] || { echo "缺少 ZIP_PASSWORD 机密，无法加密代码包"; exit 1; }
 
-          OUTPUT="${RUNNER_TEMP}/miniprogram.tar.gz.enc"
+          OUTPUT="${RUNNER_TEMP}/miniprogram.tar.gz"
           bash scripts/build-ci-package.sh "$VERSION" "$OUTPUT"
 
           # 与 ci-client.js 的 packageTag 保持同一算法：版本号可能含空格/中文，tag 用摘要
           TAG="mp-$(printf '%s' "$VERSION" | sha256sum | cut -c1-16)"
           NOTES="小程序加密代码包；版本 ${VERSION}；构建时间 $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$OUTPUT#miniprogram.tar.gz.enc" --clobber --repo "$REPO"
+            gh release upload "$TAG" "$OUTPUT#miniprogram.tar.gz" --clobber --repo "$REPO"
             gh release edit "$TAG" --title "$VERSION" --notes "$NOTES" --repo "$REPO"
           else
-            gh release create "$TAG" "$OUTPUT#miniprogram.tar.gz.enc" \
+            gh release create "$TAG" "$OUTPUT#miniprogram.tar.gz" \
               --repo "$REPO" --title "$VERSION" --notes "$NOTES"
           fi
           rm -f "$OUTPUT"
