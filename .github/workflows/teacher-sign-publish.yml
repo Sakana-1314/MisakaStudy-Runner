@@ -5,9 +5,10 @@ name: 签到发布
 #   普通（拍照+滑块验证）、手势、手势+指定地点、位置、位置+指定地点+人脸、
 #   二维码+指定地点+人脸+静态码。
 # 需要 CX_TEACHER 机密（格式 courseId=...&username=...&password=...；classId 可选）。
+# 需要 CX_STUDENT 机密（格式 username=...&password=...），供发布后的学生账号自签。
 # 自动触发（schedule）：CX_SIGN_TRIGGER=auto，删除班级内全部活动，发布后移入“自动发布”；
 # 手动触发（workflow_dispatch）：CX_SIGN_TRIGGER=manual，只删“手动发布”分组里的签到。
-# 两种模式都会在每个签到发布成功后用教师账号自签一次，结果写入运行摘要的表格。
+# 两种模式都会在每个签到发布成功后用学生账号自签一次，结果写入运行摘要的表格。
 # 定时与手动触发都签出 MisakaStudy 默认分支（next）。
 on:
   schedule:
@@ -42,12 +43,17 @@ jobs:
           go-version: '1.27'
           cache-dependency-path: server/go.sum
 
-      - name: 校验教师凭据
+      - name: 校验签到凭据
         env:
           CX_TEACHER: ${{ secrets.CX_TEACHER }}
+          CX_STUDENT: ${{ secrets.CX_STUDENT }}
         run: |
           if [ -z "$CX_TEACHER" ]; then
             echo "缺少 CX_TEACHER 机密，无法发布签到" >&2
+            exit 1
+          fi
+          if [ -z "$CX_STUDENT" ]; then
+            echo "缺少 CX_STUDENT 机密，无法执行学生账号自签" >&2
             exit 1
           fi
 
@@ -55,6 +61,7 @@ jobs:
         env:
           LIVE_UPSTREAM: '1'
           CX_TEACHER: ${{ secrets.CX_TEACHER }}
+          CX_STUDENT: ${{ secrets.CX_STUDENT }}
           CX_SIGN_TRIGGER: ${{ github.event_name == 'schedule' && 'auto' || 'manual' }}
           TZ: Asia/Shanghai
         run: |
