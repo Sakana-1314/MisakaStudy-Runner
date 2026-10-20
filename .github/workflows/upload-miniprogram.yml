@@ -166,6 +166,16 @@ jobs:
           KEY_PATH=".private/private.${APPID}.key"
           [ -f "$KEY_PATH" ] || { echo "未找到代码上传密钥 $KEY_PATH"; exit 1; }
 
+          # PR 事件不会执行上面的「构建并发布代码包」，直传前必须先构建 miniprogram_npm，
+          # 否则 usingComponents 里的 tdesign 组件找不到。
+          npx --no-install miniprogram-ci pack-npm \
+            --pp ./ \
+            --pkp "$KEY_PATH" \
+            --appid "$APPID"
+          [ -d ./miniprogram_npm/tdesign-miniprogram ] || {
+            echo "miniprogram_npm/tdesign-miniprogram 构建产物缺失"; exit 1;
+          }
+
           # BASE_URL 是机密，GitHub 会在日志里打码；未配置时回落「线上」以便一眼看出覆盖没生效
           echo "上传目标 appid=${APPID} version=${VERSION} robot=${ROBOT} baseUrl=${BASE_URL:-线上}"
           # 开发版/体验版取不到线上版本号，把本次版本号与构建时间注入代码（设置页版本信息栏展示）；
