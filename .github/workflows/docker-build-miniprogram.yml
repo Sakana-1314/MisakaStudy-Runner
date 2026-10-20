@@ -68,8 +68,8 @@ jobs:
       - name: 构建并推送
         uses: docker/build-push-action@v7
         with:
-          context: ./miniprogram
-          file: ./miniprogram/Dockerfile
+          context: ./miniprogram/ci
+          file: ./miniprogram/ci/Dockerfile
           push: true
           tags: sgccr.ccs.tencentyun.com/misaka-network/chaoxing:miniprogram
           platforms: linux/amd64,linux/arm64
