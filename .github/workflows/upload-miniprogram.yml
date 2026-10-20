@@ -141,7 +141,7 @@ jobs:
           OUTPUT="${RUNNER_TEMP}/miniprogram.tar.gz"
           bash scripts/build-ci-package.sh "$VERSION" "$OUTPUT"
 
-          # 与 ci-client.js 的 packageTag 保持同一算法：版本号可能含空格/中文，tag 用摘要
+          # 与 ci/ci-client.js 的 packageTag 保持同一算法：版本号可能含空格/中文，tag 用摘要
           TAG="mp-$(printf '%s' "$VERSION" | sha256sum | cut -c1-16)"
           NOTES="小程序加密代码包；版本 ${VERSION}；构建时间 $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
@@ -193,7 +193,7 @@ jobs:
             --enable-minify --enable-code-protect \
             --pi \
               "node_modules/**" ".private/**" ".keystore" "resource/**" \
-              "Dockerfile" ".dockerignore" "ci-client.js" \
+              "ci/**" \
               "package.json" "package-lock.json" "README.md" \
               "miniapp/**" "project.miniapp.json" "app.miniapp.json" "privacy.miniapp.json"
 
