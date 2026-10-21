@@ -98,25 +98,25 @@ jobs:
         working-directory: server
 
     services:
-      mysql:
-        image: mysql:8.0
+      postgres:
+        image: postgres:18-alpine
         env:
-          MYSQL_ROOT_PASSWORD: test
-          MYSQL_DATABASE: misaka_test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: misaka_test
         ports:
-          - 3306:3306
+          - 5432:5432
         options: >-
-          --health-cmd="mysqladmin ping -h localhost"
+          --health-cmd="pg_isready -U postgres"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
 
     env:
       # 服务端与测试进程共用同一套环境变量（大小写由 config 统一兼容）
-      db_user: root
+      db_user: postgres
       db_password: test
       db_host: 127.0.0.1
-      db_port: 3306
+      db_port: 5432
       db_name: misaka_test
       secret: e2e-test-secret-key-32chars!!
       INTERNAL_TOKEN: test-admin-token
@@ -213,25 +213,25 @@ jobs:
         working-directory: server
 
     services:
-      mysql:
-        image: mysql:8.0
+      postgres:
+        image: postgres:18-alpine
         env:
-          MYSQL_ROOT_PASSWORD: test
-          MYSQL_DATABASE: misaka_e2e
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: misaka_e2e
         ports:
-          - 3306:3306
+          - 5432:5432
         options: >-
-          --health-cmd="mysqladmin ping -h localhost"
+          --health-cmd="pg_isready -U postgres"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
 
     env:
       # 被测服务与 E2E 测试进程共用同一套环境变量（含密钥，两边派生的令牌才同源）
-      db_user: root
+      db_user: postgres
       db_password: test
       db_host: 127.0.0.1
-      db_port: 3306
+      db_port: 5432
       db_name: misaka_e2e
       secret: e2e-test-secret-key-32chars!!
       INTERNAL_TOKEN: test-admin-token
@@ -318,10 +318,10 @@ jobs:
       # 只做必填项；上游地址一律用配置默认值（即现网地址），真实请求测试要的正是那套默认值
       secret: live-upstream-test-secret-32byte
       db_name: misaka_test
-      db_user: root
+      db_user: postgres
       db_password: test
       db_host: 127.0.0.1
-      db_port: 3306
+      db_port: 5432
       INTERNAL_TOKEN: live-internal-token
       MAIN_APPID: wx-live-test
       # 打开真实请求开关：显式开启后网络不可达按失败处理，不会伪装成 skip
@@ -361,10 +361,10 @@ jobs:
     env:
       secret: fuzz-test-secret-key-32bytes!!!
       db_name: misaka_test
-      db_user: root
+      db_user: postgres
       db_password: test
       db_host: 127.0.0.1
-      db_port: 3306
+      db_port: 5432
       INTERNAL_TOKEN: fuzz-internal-token
       MAIN_APPID: wx-fuzz-test
       REQUEST_LOG_ENABLED: 'false'

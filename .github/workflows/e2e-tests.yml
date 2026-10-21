@@ -37,15 +37,15 @@ jobs:
     runs-on: ubuntu-24.04
 
     services:
-      mysql:
-        image: mysql:8.0
+      postgres:
+        image: postgres:18-alpine
         env:
-          MYSQL_ROOT_PASSWORD: test
-          MYSQL_DATABASE: misaka_test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: misaka_test
         ports:
-          - 3306:3306
+          - 5432:5432
         options: >-
-          --health-cmd="mysqladmin ping -h localhost"
+          --health-cmd="pg_isready -U postgres"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
@@ -55,10 +55,10 @@ jobs:
         working-directory: server
 
     env:
-      db_user: root
+      db_user: postgres
       db_password: test
       db_host: 127.0.0.1
-      db_port: 3306
+      db_port: 5432
       db_name: misaka_e2e
       secret: e2e-test-secret-key-32chars!!
       # 内部令牌由环境变量注入，服务端进程与 E2E 客户端须取同一值
