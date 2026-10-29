@@ -1,0 +1,188 @@
+name: 管理端静态站点发布
+
+# 把 MisakaStudy 的 web/admin 构建产物发布到该仓库 gh-pages 分支的 admin/ 目录，供 GitHub Pages 托管。
+#
+# 触发方式（与 docker-build-admin-web.yml 同构）：
+#   1) 自动：MisakaStudy 的 trigger.yml 在 push 到 next 时**无条件**派发 misaka_push，
+#      该不该发布由本文件的 paths-filter 判断（web/** 变更才发布）；
+#   2) 手动：本仓库 Actions 页「Run workflow」（可用 base_path 覆盖部署路径）。
+#
+# gh-pages 是纯产物分支：每次构建后整体重建并**强制覆盖**，不留提交历史。
+#
+# 与镜像构建的关键差别：镜像里 BASE_PATH 留空 —— 站点挂在根路径、后端地址由用户在登录页填写；
+# 而 GitHub Pages 是**项目站点**，实际路径要么是 /<仓库名>/admin/，要么（配了自定义域名时）/admin/。
+# 资源前缀必须在**构建期**定死（被改写的是产物内容本身），所以这里先算出真实路径再 pnpm build，
+# 否则 index.html 能打开、/assets/*.js 全 404 —— 白屏。
+#
+# 部署路径的取值顺序：
+#   1) workflow_dispatch 的 base_path 输入（手动覆盖）；
+#   2) gh-pages 上已有 CNAME → /admin/（自定义域名下站点在根）；
+#   3) 否则 → /<目标仓库名>/admin/（GitHub 项目页面的默认路径）。
+
+on:
+  repository_dispatch:
+    types: [misaka_push]
+  workflow_dispatch:
+    inputs:
+      base_path:
+        description: 部署子路径（留空则自动推断：有 CNAME 用 /admin/，否则用 /<仓库名>/admin/）
+        required: false
+        default: ""
+        type: string
+
+concurrency:
+  group: publish-admin-web-pages
+  cancel-in-progress: false
+
+# 推送到 MisakaStudy 用的是仓库机密 PAT（私有仓库），GITHUB_TOKEN 只需要读本工作区。
+permissions:
+  contents: read
+
+env:
+  SITE_REPO: Sakana-1314/MisakaStudy
+  SITE_BRANCH: gh-pages
+  SITE_DIR: admin
+
+jobs:
+  detect:
+    name: 检测变更路径
+    runs-on: ubuntu-24.04
+    outputs:
+      adminweb: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.adminweb == 'true' }}
+    steps:
+      - name: 签出 MisakaStudy 代码
+        uses: actions/checkout@v7
+        with:
+          repository: Sakana-1314/MisakaStudy
+          ref: ${{ github.event.client_payload.ref || 'next' }}
+          token: ${{ secrets.PAT }}
+
+      - name: 检测变更路径
+        id: filter
+        if: github.event_name == 'repository_dispatch'
+        uses: dorny/paths-filter@v4
+        with:
+          base: ${{ github.event.client_payload.before }}
+          ref: ${{ github.event.client_payload.ref }}
+          filters: |
+            adminweb:
+              - 'web/**'
+
+  publish:
+    name: 构建并发布到 gh-pages
+    needs: detect
+    if: needs.detect.outputs.adminweb == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: 签出 MisakaStudy 代码
+        uses: actions/checkout@v7
+        with:
+          repository: Sakana-1314/MisakaStudy
+          ref: ${{ github.event.client_payload.ref || 'next' }}
+          token: ${{ secrets.PAT }}
+
+      # github.sha 是本仓库（Runner）的提交，不是被发布的源码版本，得从工作区里取。
+      - name: 记录源码版本
+        id: src
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # 先读一下现存的 CNAME：配了自定义域名时站点在域名根，部署路径要跟着去掉仓库名。
+      # 强制覆盖会把 CNAME 一起清掉，所以这里同时记下来，发布时原样写回。
+      - name: 读取 CNAME 并计算部署路径
+        id: base
+        env:
+          GH_TOKEN: ${{ secrets.PAT }}
+          INPUT_BASE: ${{ inputs.base_path }}
+        run: |
+          set -euo pipefail
+          CNAME=""
+          if RAW="$(gh api "repos/${SITE_REPO}/contents/CNAME?ref=${SITE_BRANCH}" --jq '.content' 2>/dev/null)"; then
+            CNAME="$(printf '%s' "$RAW" | base64 -d | tr -d '[:space:]')"
+          fi
+
+          if [ -n "$INPUT_BASE" ]; then
+            BASE="$INPUT_BASE"
+          elif [ -n "$CNAME" ]; then
+            BASE="/admin/"
+          else
+            BASE="/${SITE_REPO#*/}/admin/"
+          fi
+
+          {
+            echo "base=$BASE"
+            echo "cname=$CNAME"
+          } >> "$GITHUB_OUTPUT"
+          echo "部署路径（Vite base）=${BASE}，自定义域名=${CNAME:-无}"
+
+      - name: 安装 Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      # 与 web/admin/Dockerfile 同一配方：Corepack 按 package.json 的 packageManager 字段
+      # （pnpm@11.7.0）取对应版本，拿不到 Corepack 时退回 npm 全局安装。
+      # 不走 pnpm/action-setup 是为了让 CI 与镜像里的安装方式一致 —— 镜像里用的也是 Corepack。
+      - name: 安装 pnpm
+        working-directory: web/admin
+        run: |
+          set -euo pipefail
+          if command -v corepack >/dev/null 2>&1; then
+            corepack enable
+          else
+            npm i -g pnpm@11.7.0
+          fi
+
+      - name: 安装依赖
+        working-directory: web/admin
+        run: pnpm install --frozen-lockfile
+
+      - name: 生成构建参数
+        id: meta
+        run: echo "build_time=$(TZ=Asia/Shanghai date +'%Y-%m-%d %H:%M:%S')" >> "$GITHUB_OUTPUT"
+
+      - name: 构建
+        working-directory: web/admin
+        env:
+          BASE_PATH: ${{ steps.base.outputs.base }}
+          BUILD_TIME: ${{ steps.meta.outputs.build_time }}
+        run: pnpm build
+
+      - name: 发布到 gh-pages
+        env:
+          GH_TOKEN: ${{ secrets.PAT }}
+          SOURCE_SHA: ${{ steps.src.outputs.sha }}
+          DEPLOY_BASE: ${{ steps.base.outputs.base }}
+          CNAME: ${{ steps.base.outputs.cname }}
+        run: |
+          set -euo pipefail
+          SITE="${RUNNER_TEMP}/site"
+          rm -rf "$SITE"
+          mkdir -p "$SITE/$SITE_DIR"
+          cp -a "$GITHUB_WORKSPACE/web/admin/dist/." "$SITE/$SITE_DIR/"
+
+          # 关掉 Jekyll：产物分支不需要它处理，也免得下划线开头的文件被静默忽略。
+          touch "$SITE/.nojekyll"
+
+          # 自定义域名必须在树上，否则强制覆盖一次就把域名配置删了。
+          if [ -n "$CNAME" ]; then printf '%s\n' "$CNAME" > "$SITE/CNAME"; fi
+
+          # 根路径放一个跳转页，直接访问站点根不会 404。
+          cat > "$SITE/index.html" <<'HTML'
+          <!DOCTYPE html>
+          <meta charset="utf-8">
+          <title>御坂学习</title>
+          <meta http-equiv="refresh" content="0; url=./admin/">
+          <a href="./admin/">御坂学习管理端</a>
+          HTML
+
+          # 每次都是全新提交树，强制覆盖远端分支：gh-pages 只保留当前这一版产物。
+          git init -q -b "$SITE_BRANCH" "$SITE"
+          git -C "$SITE" remote add origin \
+            "https://x-access-token:${GH_TOKEN}@github.com/${SITE_REPO}.git"
+          git -C "$SITE" add -A
+          git -C "$SITE" -c user.name="Sakana" -c user.email="admin@yangrucheng.top" \
+            commit -q -m "chore(admin-web): 发布管理端静态站点（${SOURCE_SHA:0:7}）"
+          git -C "$SITE" push --force origin "HEAD:${SITE_BRANCH}"
+
+          echo "已发布 ${DEPLOY_BASE} 到 ${SITE_REPO}@${SITE_BRANCH}"
