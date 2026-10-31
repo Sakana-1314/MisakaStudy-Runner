@@ -104,6 +104,6 @@ jobs:
               sed -nE 's/.*二维码汇总：(.*)/\1/p' publish.log | while IFS= read -r line; do
                 printf '%s\n' "$line" | jq -r '"| " + (.class | gsub("\\|"; "\\|")) + " | ![二维码](" + .link + ") |"' || true
               done
-            } >> "$GITHUB_STEP_SUMMARY"
+            } | tee -a "$GITHUB_STEP_SUMMARY"
             rm -f publish.log
           fi
