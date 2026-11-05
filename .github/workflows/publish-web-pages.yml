@@ -2,9 +2,9 @@ name: 静态站点发布
 
 # 把 MisakaStudy 的 web/** 构建产物发布到该仓库 gh-pages 分支，供 GitHub Pages 托管。
 #
-# 目前发布两个站点：
-#   web/admin → admin/   管理端
-#   web/guest → guest/   访客端（设备参数等公开工具页）
+# 目前发布两个站点，统一收在 `view/` 下：
+#   web/admin → view/admin/   管理端
+#   web/guest → view/guest/   访客端（设备参数等公开工具页）
 #
 # 触发方式：
 #   1) 自动：MisakaStudy 的 trigger.yml 在 push 到 next 时**无条件**派发 misaka_push，
@@ -16,11 +16,17 @@ name: 静态站点发布
 # 分开两次发的话，后一次会把前一次的目录整个删掉。所以这里只有 publish 一个任务，
 # 顺序构建两个站点、最后一并提交。
 #
+# ## 站点根不放入口页
+#
+# 只有 `view/` 一个顶层目录，站点根（`/`）**刻意不放任何文件**：两个站点都是给特定
+# 用户按链接直达的（管理端由运维打开、访客端由学习通内打开），不需要也不希望有一个
+# 列出两者入口的落地页。唯一的例外是 `.nojekyll` —— 它必须留在根上才能关掉 Jekyll。
+#
 # ## 为什么部署路径必须在构建期算出来
 #
-# GitHub Pages 是**项目站点**，真实路径要么是 /<仓库名>/<站点>/，要么（配了自定义域名时）
-# /<站点>/。资源前缀会改写产物内容本身，只能在 `pnpm build` 之前定死；
-# 否则 index.html 能打开、/misaka-assets/*.js 全 404 —— 白屏。
+# GitHub Pages 是**项目站点**，真实路径要么是 /<仓库名>/view/<站点>/，要么
+# （配了自定义域名时） /view/<站点>/。资源前缀会改写产物内容本身，只能在 `pnpm build`
+# 之前定死；否则 index.html 能打开、/misaka-assets/*.js 全 404 —— 白屏。
 #
 # 对应的构建期变量（见 web/admin 与 web/guest 的 vite.config.ts）：
 #   ADMIN_WEB_PREFIX  管理端前缀，产物落 dist/<前缀>/
@@ -29,8 +35,8 @@ name: 静态站点发布
 #
 # 部署路径的取值顺序：
 #   1) workflow_dispatch 的 base_path 输入（手动覆盖，只影响管理端，访客端由它派生）；
-#   2) gh-pages 上已有 CNAME → /admin/ 与 /guest/（自定义域名下站点在根）；
-#   3) 否则 → /<目标仓库名>/admin/ 与 /<目标仓库名>/guest/（项目页面的默认路径）。
+#   2) gh-pages 上已有 CNAME → /view/admin/ 与 /view/guest/（自定义域名下站点在根）；
+#   3) 否则 → /<目标仓库名>/view/admin/ 与 /<目标仓库名>/view/guest/（项目页面的默认路径）。
 
 on:
   repository_dispatch:
@@ -116,12 +122,12 @@ jobs:
           if [ -n "$INPUT_BASE" ]; then
             ADMIN_BASE="$INPUT_BASE"
           elif [ -n "$CNAME" ]; then
-            ADMIN_BASE="/admin/"
+            ADMIN_BASE="/view/admin/"
           else
-            ADMIN_BASE="/${SITE_REPO#*/}/admin/"
+            ADMIN_BASE="/${SITE_REPO#*/}/view/admin/"
           fi
           # 访客端与管理端同层：把管理端前缀的最后一段换掉。
-          # 例：/MisakaStudy/admin/ → /MisakaStudy/guest/
+          # 例：/MisakaStudy/view/admin/ → /MisakaStudy/view/guest/
           GUEST_BASE="${ADMIN_BASE%admin/}guest/"
 
           {
@@ -179,45 +185,27 @@ jobs:
           set -euo pipefail
           SITE="${RUNNER_TEMP}/site"
           rm -rf "$SITE"
-          # 分支里的目录名固定为 admin/ 与 guest/：gh-pages 的根就是站点根，
-          # 文件放在 admin/ 下就对应 URL /<仓库名>/admin/ 或 /admin/（有 CNAME 时），
-          # 与构建期前缀一一对应。可变的是前缀，不是这里的目录。
-          mkdir -p "$SITE/admin" "$SITE/guest"
+          # 分支里的目录是 view/admin 与 view/guest：gh-pages 的根就是站点根，
+          # 文件放在 view/admin/ 下就对应 URL /<仓库名>/view/admin/ 或 /view/admin/
+          # （有 CNAME 时），与构建期前缀一一对应。可变的是前缀，不是这里的目录。
+          mkdir -p "$SITE/view/admin" "$SITE/view/guest"
 
           # 两个站点的 vite 都把产物落在 `dist/<前缀>`（前缀去掉首尾斜杠），
           # 所以这里按前缀拼出产物路径，而不是写死 dist/admin —— 项目页面下前缀是
-          # /<仓库名>/admin/，产物实际在 dist/<仓库名>/admin/。
-          cp -a "$GITHUB_WORKSPACE/web/admin/dist${ADMIN_BASE%/}/." "$SITE/admin/"
-          cp -a "$GITHUB_WORKSPACE/web/guest/dist${GUEST_BASE%/}/." "$SITE/guest/"
+          # /<仓库名>/view/admin/，产物实际在 dist/<仓库名>/view/admin/。
+          cp -a "$GITHUB_WORKSPACE/web/admin/dist${ADMIN_BASE%/}/." "$SITE/view/admin/"
+          cp -a "$GITHUB_WORKSPACE/web/guest/dist${GUEST_BASE%/}/." "$SITE/view/guest/"
 
           # 关掉 Jekyll：产物分支不需要它处理，也免得下划线开头的文件被静默忽略。
+          # 它在站点根上，是根目录唯一保留的文件。
           touch "$SITE/.nojekyll"
 
           # 自定义域名必须在树上，否则强制覆盖一次就把域名配置删了。
           if [ -n "$CNAME" ]; then printf '%s\n' "$CNAME" > "$SITE/CNAME"; fi
 
-          # 根路径放一个入口页：直接访问站点根不会 404，也能在两个站点之间切换。
-          cat > "$SITE/index.html" <<'HTML'
-          <!DOCTYPE html>
-          <meta charset="utf-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1">
-          <title>御坂学习</title>
-          <style>
-            body { font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
-                   margin: 0; min-height: 100vh; display: grid; place-items: center;
-                   background: #f3f5fa; color: #1f2937; }
-            main { padding: 24px; }
-            h1 { margin: 0 0 4px; font-size: 20px; }
-            p { margin: 0 0 16px; color: #6b7280; font-size: 13px; }
-            a { display: block; margin-bottom: 8px; }
-          </style>
-          <main>
-            <h1>御坂学习</h1>
-            <p>学习工具</p>
-            <a href="./admin/">管理端</a>
-            <a href="./guest/">访客端</a>
-          </main>
-          HTML
+          # **刻意不放根目录入口页**：两个站点都是给特定用户按链接直达的
+          # （管理端由运维打开、访客端在学习通内打开），不需要一个列出两者的落地页。
+          # 站点根访问会得到 404，这是预期行为。
 
           # 每次都是全新提交树，强制覆盖远端分支：gh-pages 只保留当前这一版产物。
           git init -q -b "$SITE_BRANCH" "$SITE"
