@@ -1,6 +1,6 @@
 name: 静态站点发布
 
-# 把 MisakaStudy 的 web/** 构建产物发布到该仓库 gh-pages 分支，供 GitHub Pages 托管。
+# 把 MisakaStudy 的 web/** 构建产物发布到该仓库 gh-pages 分支，由 cx.misaka-network.top 的反向代理按 /view/ 托管。
 #
 # 目前发布两个站点，统一收在 `view/` 下：
 #   web/admin → view/admin/   管理端
@@ -24,9 +24,12 @@ name: 静态站点发布
 #
 # ## 为什么部署路径必须在构建期算出来
 #
-# GitHub Pages 是**项目站点**，真实路径要么是 /<仓库名>/view/<站点>/，要么
-# （配了自定义域名时） /view/<站点>/。资源前缀会改写产物内容本身，只能在 `pnpm build`
-# 之前定死；否则 index.html 能打开、/misaka-assets/*.js 全 404 —— 白屏。
+# 线上路径是固定的：反代把 `https://cx.misaka-network.top/view` 映射到本分支，
+# 两个站点分别落在 `/view/admin/` 与 `/view/guest/`。资源前缀会改写产物内容本身，
+# 只能在 `pnpm build` 之前定死；否则 index.html 能打开、/misaka-assets/*.js 全 404 —— 白屏。
+#
+# 这里**没有** /<仓库名>/ 这一层：MisakaStudy 是私有库 + 免费账号，GitHub Pages 不可用，
+# 站点不跑在项目页面路径上。曾按 /MisakaStudy/view/admin/ 构建过，线上资源全部 404。
 #
 # 对应的构建期变量（见 web/admin 与 web/guest 的 vite.config.ts）：
 #   ADMIN_WEB_PREFIX  管理端前缀，产物落 dist/<前缀>/
@@ -35,8 +38,7 @@ name: 静态站点发布
 #
 # 部署路径的取值顺序：
 #   1) workflow_dispatch 的 base_path 输入（手动覆盖，只影响管理端，访客端由它派生）；
-#   2) gh-pages 上已有 CNAME → /view/admin/ 与 /view/guest/（自定义域名下站点在根）；
-#   3) 否则 → /<目标仓库名>/view/admin/ 与 /<目标仓库名>/view/guest/（项目页面的默认路径）。
+#   2) 否则 → /view/admin/ 与 /view/guest/（反代映射的固定路径）。
 
 on:
   repository_dispatch:
@@ -44,7 +46,7 @@ on:
   workflow_dispatch:
     inputs:
       base_path:
-        description: 管理端部署子路径（留空则自动推断；访客端取同级的 guest/）
+        description: 管理端部署子路径（留空用 /view/admin/；访客端取同级的 guest/）
         required: false
         default: ""
         type: string
@@ -105,8 +107,8 @@ jobs:
         id: src
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      # 先读一下现存的 CNAME：配了自定义域名时站点在域名根，部署路径要跟着去掉仓库名。
-      # 强制覆盖会把 CNAME 一起清掉，所以这里同时记下来，发布时原样写回。
+      # 先读一下现存的 CNAME：强制覆盖会把它一起清掉，所以这里记下来，发布时原样写回。
+      # 它不参与部署路径计算 —— 站点由反代按 /view/ 托管，不是 GitHub Pages。
       - name: 读取 CNAME 并计算部署路径
         id: base
         env:
@@ -121,13 +123,12 @@ jobs:
 
           if [ -n "$INPUT_BASE" ]; then
             ADMIN_BASE="$INPUT_BASE"
-          elif [ -n "$CNAME" ]; then
-            ADMIN_BASE="/view/admin/"
           else
-            ADMIN_BASE="/${SITE_REPO#*/}/view/admin/"
+            # 反代把 /view 映射到本分支，路径固定，不带仓库名。
+            ADMIN_BASE="/view/admin/"
           fi
           # 访客端与管理端同层：把管理端前缀的最后一段换掉。
-          # 例：/MisakaStudy/view/admin/ → /MisakaStudy/view/guest/
+          # 例：/view/admin/ → /view/guest/
           GUEST_BASE="${ADMIN_BASE%admin/}guest/"
 
           {
@@ -186,13 +187,12 @@ jobs:
           SITE="${RUNNER_TEMP}/site"
           rm -rf "$SITE"
           # 分支里的目录是 view/admin 与 view/guest：gh-pages 的根就是站点根，
-          # 文件放在 view/admin/ 下就对应 URL /<仓库名>/view/admin/ 或 /view/admin/
-          # （有 CNAME 时），与构建期前缀一一对应。可变的是前缀，不是这里的目录。
+          # 文件放在 view/admin/ 下就对应 URL /view/admin/，与构建期前缀一一对应。
+          # 可变的是前缀，不是这里的目录。
           mkdir -p "$SITE/view/admin" "$SITE/view/guest"
 
           # 两个站点的 vite 都把产物落在 `dist/<前缀>`（前缀去掉首尾斜杠），
-          # 所以这里按前缀拼出产物路径，而不是写死 dist/admin —— 项目页面下前缀是
-          # /<仓库名>/view/admin/，产物实际在 dist/<仓库名>/view/admin/。
+          # 所以这里按前缀拼出产物路径，而不是写死 dist/admin。
           cp -a "$GITHUB_WORKSPACE/web/admin/dist${ADMIN_BASE%/}/." "$SITE/view/admin/"
           cp -a "$GITHUB_WORKSPACE/web/guest/dist${GUEST_BASE%/}/." "$SITE/view/guest/"
 
