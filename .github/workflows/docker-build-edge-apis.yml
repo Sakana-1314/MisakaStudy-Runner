@@ -1,0 +1,80 @@
+name: 边缘节点镜像构建
+
+# 由 MisakaStudy 仓库 trigger.yml 经 repository_dispatch(misaka_push) 触发，仅在 edge/apis/** 变更时构建；
+# 也可在 Runner 仓库手动触发（workflow_dispatch，构建本镜像）。
+#
+# 与 docker-build-server.yml 同构：私有仓库的 push 事件是**无条件**派发的，
+# 具体该不该构建由本文件的 paths-filter 判断，因此 trigger.yml 不必改。
+#
+# 节点侧只拉镜像；接入参数（EDGE_SERVER_URL / EDGE_TOKEN / EDGE_NODE_ID）全部由容器环境变量提供，
+# 镜像里不含任何凭据。
+on:
+  repository_dispatch:
+    types: [misaka_push]
+  workflow_dispatch:
+
+concurrency:
+  group: docker-build-edge-apis
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    name: 检测变更路径
+    runs-on: ubuntu-24.04
+    outputs:
+      edgeapis: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.edgeapis == 'true' }}
+    steps:
+      - name: 签出 MisakaStudy 代码
+        uses: actions/checkout@v7
+        with:
+          repository: Sakana-1314/MisakaStudy
+          ref: ${{ github.event.client_payload.ref || 'next' }}
+          token: ${{ secrets.PAT }}
+
+      - name: 检测变更路径
+        id: filter
+        if: github.event_name == 'repository_dispatch'
+        uses: dorny/paths-filter@v4
+        with:
+          base: ${{ github.event.client_payload.before }}
+          ref: ${{ github.event.client_payload.ref }}
+          filters: |
+            edgeapis:
+              - 'edge/apis/**'
+
+  build:
+    name: 构建并推送边缘节点镜像
+    needs: detect
+    if: needs.detect.outputs.edgeapis == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: 签出 MisakaStudy 代码
+        uses: actions/checkout@v7
+        with:
+          repository: Sakana-1314/MisakaStudy
+          ref: ${{ github.event.client_payload.ref || 'next' }}
+          token: ${{ secrets.PAT }}
+
+      - name: 安装 QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: 安装 Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: 登录腾讯云容器镜像服务
+        uses: docker/login-action@v4
+        with:
+          registry: sgccr.ccs.tencentyun.com
+          username: ${{ secrets.TENCENT_REGISTRY_USERNAME }}
+          password: ${{ secrets.TENCENT_REGISTRY_PASSWORD }}
+
+      - name: 构建并推送
+        uses: docker/build-push-action@v7
+        with:
+          context: ./edge/apis
+          file: ./edge/apis/Dockerfile
+          push: true
+          tags: sgccr.ccs.tencentyun.com/misaka-network/chaoxing:edge-apis
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha,scope=edge-apis
+          cache-to: type=gha,mode=max,scope=edge-apis
