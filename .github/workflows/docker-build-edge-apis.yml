@@ -74,7 +74,7 @@ jobs:
           context: ./edge/apis
           file: ./edge/apis/Dockerfile
           push: true
-          tags: sgccr.ccs.tencentyun.com/misaka-network/chaoxing:edge-apis
+          tags: sgccr.ccs.tencentyun.com/misaka-network/chaoxing:edge-node
           platforms: linux/amd64,linux/arm64
-          cache-from: type=gha,scope=edge-apis
-          cache-to: type=gha,mode=max,scope=edge-apis
+          cache-from: type=gha,scope=edge-node
+          cache-to: type=gha,mode=max,scope=edge-node
