@@ -2,9 +2,10 @@ name: 静态站点发布
 
 # 把 MisakaStudy 的 web/** 构建产物发布到该仓库 gh-pages 分支，由 cx.misaka-network.top 的反向代理按 /view/ 托管。
 #
-# 目前发布两个站点，统一收在 `view/` 下：
+# 目前发布三个站点，统一收在 `view/` 下：
 #   web/admin → view/admin/   管理端
 #   web/guest → view/guest/   访客端（设备参数等公开工具页）
+#   web/docs  → view/docs/    文档站（VitePress）
 #
 # 触发方式：
 #   1) 自动：MisakaStudy 的 trigger.yml 在 push 到 next 时**无条件**派发 misaka_push，
@@ -12,15 +13,15 @@ name: 静态站点发布
 #   2) 手动：本仓库 Actions 页「Run workflow」（可用 base_path 覆盖部署路径）。
 #
 # gh-pages 是纯产物分支：每次构建后整体重建并**强制覆盖**，不留提交历史。
-# 也正因为是强制覆盖，两个站点**必须在同一次提交里一起发布** ——
+# 也正因为是强制覆盖，三个站点**必须在同一次提交里一起发布** ——
 # 分开两次发的话，后一次会把前一次的目录整个删掉。所以这里只有 publish 一个任务，
-# 顺序构建两个站点、最后一并提交。
+# 顺序构建三个站点、最后一并提交。
 #
 # ## 站点根不放入口页
 #
-# 只有 `view/` 一个顶层目录，站点根（`/`）**刻意不放任何文件**：两个站点都是给特定
-# 用户按链接直达的（管理端由运维打开、访客端由学习通内打开），不需要也不希望有一个
-# 列出两者入口的落地页。唯一的例外是 `.nojekyll` —— 它必须留在根上才能关掉 Jekyll。
+# 只有 `view/` 一个顶层目录，站点根（`/`）**刻意不放任何文件**：三个站点都是给特定
+# 用户按链接直达的（管理端由运维打开、访客端由学习通内打开、文档站由用户从教程入口打开），
+# 不需要也不希望有一个列出三者入口的落地页。唯一的例外是 `.nojekyll` —— 它必须留在根上才能关掉 Jekyll。
 #
 # ## 为什么部署路径必须在构建期算出来
 #
@@ -31,14 +32,15 @@ name: 静态站点发布
 # 这里**没有** /<仓库名>/ 这一层：MisakaStudy 是私有库 + 免费账号，GitHub Pages 不可用，
 # 站点不跑在项目页面路径上。曾按 /MisakaStudy/view/admin/ 构建过，线上资源全部 404。
 #
-# 对应的构建期变量（见 web/admin 与 web/guest 的 vite.config.ts）：
+# 对应的构建期变量（见 web/admin 与 web/guest 的 vite.config.ts、web/docs 的 VitePress config）：
 #   ADMIN_WEB_PREFIX  管理端前缀，产物落 dist/<前缀>/
 #   GUEST_WEB_PREFIX  访客端前缀，产物落 dist/<前缀>/
-# 这两个名字与服务端镜像构建（docker build --build-arg）保持同一口径。
+#   DOCS_WEB_PREFIX   文档站前缀，VitePress 直接把它写进资源与站内链接
+# 前两个名字与服务端镜像构建（docker build --build-arg）保持同一口径。
 #
 # 部署路径的取值顺序：
-#   1) workflow_dispatch 的 base_path 输入（手动覆盖，只影响管理端，访客端由它派生）；
-#   2) 否则 → /view/admin/ 与 /view/guest/（反代映射的固定路径）。
+#   1) workflow_dispatch 的 base_path 输入（手动覆盖，只影响管理端，访客端与文档站由它派生）；
+#   2) 否则 → /view/admin/、/view/guest/ 与 /view/docs/（反代映射的固定路径）。
 
 on:
   repository_dispatch:
@@ -130,13 +132,16 @@ jobs:
           # 访客端与管理端同层：把管理端前缀的最后一段换掉。
           # 例：/view/admin/ → /view/guest/
           GUEST_BASE="${ADMIN_BASE%admin/}guest/"
+          # 文档站同理：/view/admin/ → /view/docs/
+          DOCS_BASE="${ADMIN_BASE%admin/}docs/"
 
           {
             echo "admin_base=$ADMIN_BASE"
             echo "guest_base=$GUEST_BASE"
+            echo "docs_base=$DOCS_BASE"
             echo "cname=$CNAME"
           } >> "$GITHUB_OUTPUT"
-          echo "管理端=${ADMIN_BASE} 访客端=${GUEST_BASE} 自定义域名=${CNAME:-无}"
+          echo "管理端=${ADMIN_BASE} 访客端=${GUEST_BASE} 文档站=${DOCS_BASE} 自定义域名=${CNAME:-无}"
 
       - name: 安装 Node
         uses: actions/setup-node@v7
@@ -175,26 +180,40 @@ jobs:
           GUEST_WEB_PREFIX: ${{ steps.base.outputs.guest_base }}
         run: pnpm build
 
+      # 文档站是 VitePress（npm 锁文件），不走 pnpm；前缀由 config.js 的 DOCS_WEB_PREFIX 读取。
+      - name: 安装文档站依赖
+        working-directory: web/docs
+        run: npm ci --include=dev
+
+      - name: 构建文档站
+        working-directory: web/docs
+        env:
+          DOCS_WEB_PREFIX: ${{ steps.base.outputs.docs_base }}
+        run: npm run docs:build
+
       - name: 发布到 gh-pages
         env:
           GH_TOKEN: ${{ secrets.PAT }}
           SOURCE_SHA: ${{ steps.src.outputs.sha }}
           ADMIN_BASE: ${{ steps.base.outputs.admin_base }}
           GUEST_BASE: ${{ steps.base.outputs.guest_base }}
+          DOCS_BASE: ${{ steps.base.outputs.docs_base }}
           CNAME: ${{ steps.base.outputs.cname }}
         run: |
           set -euo pipefail
           SITE="${RUNNER_TEMP}/site"
           rm -rf "$SITE"
-          # 分支里的目录是 view/admin 与 view/guest：gh-pages 的根就是站点根，
-          # 文件放在 view/admin/ 下就对应 URL /view/admin/，与构建期前缀一一对应。
+          # 分支里的目录是 view/admin、view/guest 与 view/docs：gh-pages 的根就是站点根，
+          # 文件放在 view/docs/ 下就对应 URL /view/docs/，与构建期前缀一一对应。
           # 可变的是前缀，不是这里的目录。
-          mkdir -p "$SITE/view/admin" "$SITE/view/guest"
+          mkdir -p "$SITE/view/admin" "$SITE/view/guest" "$SITE/view/docs"
 
-          # 两个站点的 vite 都把产物落在 `dist/<前缀>`（前缀去掉首尾斜杠），
+          # 管理端与访客端的 vite 都把产物落在 `dist/<前缀>`（前缀去掉首尾斜杠），
           # 所以这里按前缀拼出产物路径，而不是写死 dist/admin。
           cp -a "$GITHUB_WORKSPACE/web/admin/dist${ADMIN_BASE%/}/." "$SITE/view/admin/"
           cp -a "$GITHUB_WORKSPACE/web/guest/dist${GUEST_BASE%/}/." "$SITE/view/guest/"
+          # 文档站的 VitePress 产物固定是 .vitepress/dist，前缀只影响资源 URL。
+          cp -a "$GITHUB_WORKSPACE/web/docs/.vitepress/dist/." "$SITE/view/docs/"
 
           # 关掉 Jekyll：产物分支不需要它处理，也免得下划线开头的文件被静默忽略。
           # 它在站点根上，是根目录唯一保留的文件。
@@ -203,9 +222,9 @@ jobs:
           # 自定义域名必须在树上，否则强制覆盖一次就把域名配置删了。
           if [ -n "$CNAME" ]; then printf '%s\n' "$CNAME" > "$SITE/CNAME"; fi
 
-          # **刻意不放根目录入口页**：两个站点都是给特定用户按链接直达的
-          # （管理端由运维打开、访客端在学习通内打开），不需要一个列出两者的落地页。
-          # 站点根访问会得到 404，这是预期行为。
+          # **刻意不放根目录入口页**：三个站点都是给特定用户按链接直达的
+          # （管理端由运维打开、访客端在学习通内打开、文档站从教程入口打开），
+          # 不需要一个列出三者的落地页。站点根访问会得到 404，这是预期行为。
 
           # 每次都是全新提交树，强制覆盖远端分支：gh-pages 只保留当前这一版产物。
           git init -q -b "$SITE_BRANCH" "$SITE"
@@ -222,4 +241,4 @@ jobs:
             commit -q -m "chore(web): 发布静态站点（${SOURCE_SHA:0:7}）"
           git -C "$SITE" push --force origin "HEAD:${SITE_BRANCH}"
 
-          echo "已发布 ${ADMIN_BASE} 与 ${GUEST_BASE} 到 ${SITE_REPO}@${SITE_BRANCH}"
+          echo "已发布 ${ADMIN_BASE}、${GUEST_BASE} 与 ${DOCS_BASE} 到 ${SITE_REPO}@${SITE_BRANCH}"
