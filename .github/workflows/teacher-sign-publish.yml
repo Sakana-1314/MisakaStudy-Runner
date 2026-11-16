@@ -1,6 +1,6 @@
 name: 签到发布
 
-# 每周六 06:00（北京时间，UTC+8）= 每周五 22:00 UTC 自动执行；也可在 Actions 页手动运行。
+# 每天 01:30（北京时间，UTC+8）= 前一天 17:30 UTC 自动执行；也可在 Actions 页手动运行。
 # 执行 MisakaStudy 的教师侧发签到 live 用例 TestLiveTeacherPublishAllSignTypes：
 #   普通（拍照+滑块验证）、手势、手势+指定地点、位置、位置+指定地点+人脸、
 #   二维码+指定地点+人脸+静态码。
@@ -14,7 +14,7 @@ name: 签到发布
 # 便于在合并前验证 PR 分支（例如拍照签到的 UA 修复）。
 on:
   schedule:
-    - cron: '0 22 * * 5'
+    - cron: '30 17 * * *'
   workflow_dispatch:
     inputs:
       ref:
