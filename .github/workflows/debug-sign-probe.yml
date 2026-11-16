@@ -57,6 +57,8 @@ jobs:
           sed -nE 's/.*发布汇总：(.*)/\1/p' probe.log
           echo "--- 失败位置（file:line） ---"
           grep -aoE "[a-z_]+_test\.go:[0-9]+" probe.log | sort -u
+          echo "--- 发起签到失败的脱敏错误文本（只留中文） ---"
+          grep -a "发起签到失败" probe.log | sed -E 's/.*发起签到失败：//'             | grep -oP '\p{Han}+' | head -20
           echo "--- 命中的固定错误标签 ---"
           for key in \
             "签到类型不符" \
