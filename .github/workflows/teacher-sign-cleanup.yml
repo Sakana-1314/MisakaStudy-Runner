@@ -1,0 +1,78 @@
+name: 签到清理
+
+# 每天 01:00（北京时间，UTC+8）= 前一天 17:00 UTC 自动执行；也可在 Actions 页手动运行。
+# 以 auto 模式跑 MisakaStudy 的 TestLiveTeacherDeleteAllSigns：删除课程下每个班级里的
+# **全部活动**（不论类型、不论分组、不论是谁发的），30 分钟后「签到发布」再发新的一批，
+# 签到截止次日 01:30，因此不会堆积；手动发布的签到也随下一次清理删除。
+# 需要 CX_TEACHER 机密（格式 courseId=...&username=...&password=...；classId 可选）。
+on:
+  schedule:
+    - cron: '0 17 * * *'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 要运行的 MisakaStudy 分支或 commit（留空用 next）
+        required: false
+        default: next
+
+permissions:
+  contents: read
+
+concurrency:
+  group: teacher-sign-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: 清理全部活动
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: server/core
+    steps:
+      - name: 签出 MisakaStudy 代码
+        uses: actions/checkout@v7
+        with:
+          repository: Sakana-1314/MisakaStudy
+          ref: ${{ inputs.ref || 'next' }}
+          token: ${{ secrets.PAT }}
+
+      - name: 安装 Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.27'
+          cache-dependency-path: server/core/go.sum
+
+      - name: 校验签到凭据
+        env:
+          CX_TEACHER: ${{ secrets.CX_TEACHER }}
+        run: |
+          if [ -z "$CX_TEACHER" ]; then
+            echo "缺少 CX_TEACHER 机密，无法清理活动" >&2
+            exit 1
+          fi
+
+      - name: 删除全部活动
+        env:
+          LIVE_UPSTREAM: '1'
+          CX_TEACHER: ${{ secrets.CX_TEACHER }}
+          CX_SIGN_TRIGGER: auto
+          TZ: Asia/Shanghai
+        run: |
+          # 本仓库是公开仓库：完整输出里有 classId、activeId、活动标题，只写 runner 本地日志，
+          # 失败也不回显；摘要只保留不含 ID 的删除计数。
+          if go test ./tests/live -run TestLiveTeacherDeleteAllSigns -v -count=1 > cleanup.log 2>&1; then
+            echo "活动清理完成"
+          else
+            status=$?
+            echo "::error::活动清理失败；完整日志含 classId/activeId 等内部信息，已丢弃，不写入公开日志"
+            exit "$status"
+          fi
+          summary=$(sed -nE 's/.*清理完成（模式=auto）：(.*)/\1/p' cleanup.log | tail -1)
+          {
+            echo '### 签到清理'
+            echo ''
+            echo "删除全部活动：${summary:-完成}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          rm -f cleanup.log
