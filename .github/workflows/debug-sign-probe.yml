@@ -1,0 +1,69 @@
+name: 调试签到发布探针
+
+# 临时诊断工作流：只输出各阶段是否成功（PROBE 行），不输出 classId/activeId/响应正文。
+# 仅用于排查「签到发布」在 GitHub 跑步机上失败在登录/班级列表/发布哪一步，验证完删除分支。
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 要探测的 MisakaStudy 分支或 commit（留空用 next）
+        required: false
+        default: next
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: 探针
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: server/core
+    steps:
+      - name: 签出 MisakaStudy 代码
+        uses: actions/checkout@v7
+        with:
+          repository: Sakana-1314/MisakaStudy
+          ref: ${{ inputs.ref || 'next' }}
+          token: ${{ secrets.PAT }}
+
+      - name: 安装 Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.27'
+          cache-dependency-path: server/core/go.sum
+
+      - name: 分阶段探测
+        env:
+          LIVE_UPSTREAM: '1'
+          CX_TEACHER: ${{ secrets.CX_TEACHER }}
+          CX_STUDENT: ${{ secrets.CX_STUDENT }}
+          TZ: Asia/Shanghai
+        run: |
+          cat > tests/live/probe_test.go <<'EOF'
+          package live
+
+          import "testing"
+
+          // TestProbeStages 只验证教师登录、学生登录与班级列表，日志里不带任何 ID。
+          func TestProbeStages(t *testing.T) {
+          	liveEnabled(t)
+          	credential := teacherSignCredentials(t)
+          	client, cookies := loginTeacher(t, credential)
+          	t.Logf("PROBE: teacher_login ok cookies=%d", len(cookies))
+          	student := studentSignCredentials(t)
+          	_, _ = loginStudent(t, student)
+          	t.Logf("PROBE: student_login ok")
+          	classes := teacherClasses(t, client, cookies, credential)
+          	t.Logf("PROBE: classes ok count=%d", len(classes))
+          }
+          EOF
+          # 失败时 test 会打印含 ID 的细节，只回显阶段标记，不回显原始输出。
+          go test ./tests/live -run TestProbeStages -v -count=1 > probe.log 2>&1 || true
+          grep -oE "PROBE: [a-z_]+ ok[^\"']*" probe.log || true
+          grep -q "PROBE: teacher_login ok" probe.log || echo "PROBE: teacher_login failed"
+          grep -q "PROBE: student_login ok" probe.log || echo "PROBE: student_login failed"
+          grep -q "PROBE: classes ok" probe.log || echo "PROBE: classes failed"
+          rm -f probe.log
