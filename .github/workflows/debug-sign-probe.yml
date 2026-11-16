@@ -45,25 +45,46 @@ jobs:
           cat > tests/live/probe_test.go <<'EOF'
           package live
 
-          import "testing"
+          import (
+          	"testing"
+          	"time"
+          )
 
-          // TestProbeStages 只验证教师登录、学生登录与班级列表，日志里不带任何 ID。
+          // TestProbeStages 只验证各阶段是否通过，日志里不带任何 ID 与响应正文。
           func TestProbeStages(t *testing.T) {
           	liveEnabled(t)
           	credential := teacherSignCredentials(t)
-          	client, cookies := loginTeacher(t, credential)
-          	t.Logf("PROBE: teacher_login ok cookies=%d", len(cookies))
           	student := studentSignCredentials(t)
-          	_, _ = loginStudent(t, student)
+          	location := teacherSignLocationFromEnv()
+          	client, cookies := loginTeacher(t, credential)
+          	t.Logf("PROBE: teacher_login ok")
+          	signerClient, signerCookies := loginStudent(t, student)
           	t.Logf("PROBE: student_login ok")
           	classes := teacherClasses(t, client, cookies, credential)
           	t.Logf("PROBE: classes ok count=%d", len(classes))
+          	mode := teacherSignMode()
+          	groupID := ensureTeacherGroup(t, client, cookies, credential, classes, teacherSignGroupName(mode))
+          	t.Logf("PROBE: group ok")
+          	_ = newStudentSelfSigner(t, signerClient, signerCookies, client, cookies, location, student.face)
+          	t.Logf("PROBE: device_session ok")
+          	for i, class := range classes {
+          		deleted, failed := cleanupClassForMode(t, client, cookies, credential, class, mode, groupID)
+          		t.Logf("PROBE: cleanup class=%d deleted=%d failed=%d", i, deleted, failed)
+          	}
+          	variant := teacherSignVariant{name: "普通签到（拍照+滑块验证）", otherID: "0", photo: true}
+          	class := classes[0]
+          	activeID := publishTeacherSign(t, client, cookies,
+          		teacherPublishQuery(credential.courseID, class.ID, location, variant, variant.name))
+          	t.Logf("PROBE: publish ok")
+          	detail := fetchTeacherActiveData(t, client, cookies, activeID)
+          	t.Logf("PROBE: detail ok")
+          	verifyTeacherSign(t, variant, location, detail)
+          	t.Logf("PROBE: verify ok")
+          	verifyTeacherSignEndTime(t, detail, nextSaturdayFiveAM(time.Now()))
+          	t.Logf("PROBE: end_time ok")
           }
           EOF
           # 失败时 test 会打印含 ID 的细节，只回显阶段标记，不回显原始输出。
           go test ./tests/live -run TestProbeStages -v -count=1 > probe.log 2>&1 || true
-          grep -oE "PROBE: [a-z_]+ ok[^\"']*" probe.log || true
-          grep -q "PROBE: teacher_login ok" probe.log || echo "PROBE: teacher_login failed"
-          grep -q "PROBE: student_login ok" probe.log || echo "PROBE: student_login failed"
-          grep -q "PROBE: classes ok" probe.log || echo "PROBE: classes failed"
+          grep -oE "PROBE: [a-z_ ]+(ok|failed)[^\"']*" probe.log | sed -E 's/[0-9]{4,}/***/g' || true
           rm -f probe.log
