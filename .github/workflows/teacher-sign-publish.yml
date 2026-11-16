@@ -44,7 +44,7 @@ jobs:
     timeout-minutes: 15
     defaults:
       run:
-        working-directory: server
+        working-directory: server/core
     steps:
       - name: 签出 MisakaStudy 代码
         uses: actions/checkout@v7
@@ -57,7 +57,7 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: '1.27'
-          cache-dependency-path: server/go.sum
+          cache-dependency-path: server/core/go.sum
 
       - name: 校验签到凭据
         env:

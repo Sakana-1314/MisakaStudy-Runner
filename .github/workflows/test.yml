@@ -32,9 +32,9 @@ jobs:
           ref: ${{ github.event.client_payload.ref }}
           filters: |
             server:
-              - 'server/**'
+              - 'server/core/**'
             edge_apis:
-              - 'edge/apis/**'
+              - 'server/edge/**'
             edge_manger:
               - 'edge/manger/**'
 
@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-24.04
     defaults:
       run:
-        working-directory: server
+        working-directory: server/core
     steps:
       - name: 签出 MisakaStudy 代码
         uses: actions/checkout@v7
@@ -56,7 +56,7 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: '1.27'
-          cache-dependency-path: server/go.sum
+          cache-dependency-path: server/core/go.sum
 
       - name: 校验规范与路由表一致
         # 规范是人工维护的接口事实来源：这里用回归测试锁定「规范 ↔ 注册路由」双向一致、
@@ -95,7 +95,7 @@ jobs:
     runs-on: ubuntu-24.04
     defaults:
       run:
-        working-directory: server
+        working-directory: server/core
 
     services:
       postgres:
@@ -135,7 +135,7 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: '1.27'
-          cache-dependency-path: server/go.sum
+          cache-dependency-path: server/core/go.sum
 
       - name: Go 代码格式检查
         run: test -z "$(gofmt -l .)"
@@ -210,7 +210,7 @@ jobs:
     runs-on: ubuntu-24.04
     defaults:
       run:
-        working-directory: server
+        working-directory: server/core
 
     services:
       postgres:
@@ -251,7 +251,7 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: '1.27'
-          cache-dependency-path: server/go.sum
+          cache-dependency-path: server/core/go.sum
 
       - name: 解析学习通测试凭据
         # 机密格式：username=<手机号>&password=<口令>&courseId=<课程>&classId=<班级>
@@ -301,7 +301,7 @@ jobs:
           # 服务端由测试进程拉起在自己的临时目录里；失败时日志已随 `go test -v` 打进构建输出。
           # 这里额外收集仓库内日志目录（本地路径场景），缺失不报错。
           path: |
-            server/logs/
+            server/core/logs/
             /tmp/e2e-run/server.log
           if-no-files-found: ignore
 
@@ -312,7 +312,7 @@ jobs:
     runs-on: ubuntu-24.04
     defaults:
       run:
-        working-directory: server
+        working-directory: server/core
 
     env:
       # 只做必填项；上游地址一律用配置默认值（即现网地址），真实请求测试要的正是那套默认值
@@ -339,7 +339,7 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: '1.27'
-          cache-dependency-path: server/go.sum
+          cache-dependency-path: server/core/go.sum
 
       - name: 运行真实上游测试
         # 打真实第三方：超星滑块验证码与登录页、DoH、QQ 机器人、飞书、钉钉、EdgeOne。
@@ -356,7 +356,7 @@ jobs:
     runs-on: ubuntu-24.04
     defaults:
       run:
-        working-directory: server
+        working-directory: server/core
 
     env:
       secret: fuzz-test-secret-key-32bytes!!!
@@ -381,7 +381,7 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: '1.27'
-          cache-dependency-path: server/go.sum
+          cache-dependency-path: server/core/go.sum
 
       - name: 模糊测试安全解析入口
         # 这些函数（令牌、签名值、cookie、clientId）的输入全部来自网络，最重要的不变量是
@@ -410,7 +410,7 @@ jobs:
         with:
           name: fuzz-corpus-server
           # 语料始终落在「发现目标的那个包」的 testdata/fuzz/ 下，因此按通配收集
-          path: server/internal/**/testdata/fuzz/
+          path: server/core/internal/**/testdata/fuzz/
           if-no-files-found: ignore
 
   edge-apis-tests:
@@ -420,7 +420,7 @@ jobs:
     runs-on: ubuntu-24.04
     defaults:
       run:
-        working-directory: edge/apis
+        working-directory: server/edge
 
     steps:
       - name: 签出 MisakaStudy 代码
@@ -434,7 +434,7 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: '1.27'
-          cache-dependency-path: edge/apis/go.sum
+          cache-dependency-path: server/edge/go.mod
 
       - name: Go 代码检查
         run: go vet ./...

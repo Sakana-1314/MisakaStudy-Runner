@@ -28,7 +28,7 @@ jobs:
           ref: ${{ github.event.client_payload.ref }}
           filters: |
             server:
-              - 'server/**'
+              - 'server/core/**'
 
   e2e:
     name: 端到端测试
@@ -52,7 +52,7 @@ jobs:
 
     defaults:
       run:
-        working-directory: server
+        working-directory: server/core
 
     env:
       db_user: postgres
@@ -80,7 +80,7 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: '1.27'
-          cache-dependency-path: server/go.sum
+          cache-dependency-path: server/core/go.sum
 
       - name: 创建数据库表并填充测试数据
         run: |

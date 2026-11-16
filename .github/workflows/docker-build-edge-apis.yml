@@ -1,6 +1,6 @@
 name: 边缘节点镜像构建
 
-# 由 MisakaStudy 仓库 trigger.yml 经 repository_dispatch(misaka_push) 触发，仅在 edge/apis/** 变更时构建；
+# 由 MisakaStudy 仓库 trigger.yml 经 repository_dispatch(misaka_push) 触发，仅在 server/edge/** 变更时构建；
 # 也可在 Runner 仓库手动触发（workflow_dispatch，构建本镜像）。
 #
 # 与 docker-build-server.yml 同构：私有仓库的 push 事件是**无条件**派发的，
@@ -40,7 +40,7 @@ jobs:
           ref: ${{ github.event.client_payload.ref }}
           filters: |
             edgeapis:
-              - 'edge/apis/**'
+              - 'server/edge/**'
 
   build:
     name: 构建并推送边缘节点镜像
@@ -71,8 +71,8 @@ jobs:
       - name: 构建并推送
         uses: docker/build-push-action@v7
         with:
-          context: ./edge/apis
-          file: ./edge/apis/Dockerfile
+          context: ./server/edge
+          file: ./server/edge/Dockerfile
           push: true
           tags: sgccr.ccs.tencentyun.com/misaka-network/chaoxing:edge-apis
           platforms: linux/amd64,linux/arm64
