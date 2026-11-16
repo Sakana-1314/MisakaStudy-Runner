@@ -3,7 +3,7 @@ name: 签到发布
 # 每天 01:30（北京时间，UTC+8）= 前一天 17:30 UTC 自动执行；也可在 Actions 页手动运行。
 # 签到截止次日 01:30；每天 01:00 的「签到清理」会先删除班级内全部活动，二者配合不堆积。
 # 执行 MisakaStudy 的教师侧发签到 live 用例 TestLiveTeacherPublishAllSignTypes：
-#   普通（拍照+滑块验证）、手势、手势+指定地点、位置、位置+指定地点+人脸、
+#   普通（拍照+滑块验证）、手势、手势+指定地点、位置+指定地点、位置+指定地点+人脸、
 #   二维码+指定地点+人脸+静态码。
 # 需要 CX_TEACHER 机密（格式 courseId=...&username=...&password=...；classId 可选）。
 # 需要 CX_STUDENT 机密（格式 username=...&password=...），供发布后的学生账号自签。
