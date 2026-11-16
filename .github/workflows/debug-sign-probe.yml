@@ -1,7 +1,8 @@
 name: 调试签到发布探针
 
-# 临时诊断工作流：只输出各阶段是否成功（PROBE 行），不输出 classId/activeId/响应正文。
-# 仅用于排查「签到发布」在 GitHub 跑步机上失败在登录/班级列表/发布哪一步，验证完删除分支。
+# 临时诊断工作流：跑完整「签到发布」用例，只回显脱敏后的失败位置
+# （子测试名、file:line、命中固定错误标签），不输出 classId/activeId/响应正文/凭据。
+# 仅用于排查 CI 失败，验证完删除该工作流。
 on:
   workflow_dispatch:
     inputs:
@@ -17,7 +18,7 @@ jobs:
   probe:
     name: 探针
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: server/core
@@ -35,56 +36,49 @@ jobs:
           go-version: '1.27'
           cache-dependency-path: server/core/go.sum
 
-      - name: 分阶段探测
+      - name: 跑完整用例并脱敏回显
         env:
           LIVE_UPSTREAM: '1'
           CX_TEACHER: ${{ secrets.CX_TEACHER }}
           CX_STUDENT: ${{ secrets.CX_STUDENT }}
           TZ: Asia/Shanghai
         run: |
-          cat > tests/live/probe_test.go <<'EOF'
-          package live
-
-          import (
-          	"testing"
-          	"time"
-          )
-
-          // TestProbeStages 只验证各阶段是否通过，日志里不带任何 ID 与响应正文。
-          func TestProbeStages(t *testing.T) {
-          	liveEnabled(t)
-          	credential := teacherSignCredentials(t)
-          	student := studentSignCredentials(t)
-          	location := teacherSignLocationFromEnv()
-          	client, cookies := loginTeacher(t, credential)
-          	t.Logf("PROBE: teacher_login ok")
-          	signerClient, signerCookies := loginStudent(t, student)
-          	t.Logf("PROBE: student_login ok")
-          	classes := teacherClasses(t, client, cookies, credential)
-          	t.Logf("PROBE: classes ok count=%d", len(classes))
-          	mode := teacherSignMode()
-          	groupID := ensureTeacherGroup(t, client, cookies, credential, classes, teacherSignGroupName(mode))
-          	t.Logf("PROBE: group ok")
-          	_ = newStudentSelfSigner(t, signerClient, signerCookies, client, cookies, location, student.face)
-          	t.Logf("PROBE: device_session ok")
-          	for i, class := range classes {
-          		deleted, failed := cleanupClassForMode(t, client, cookies, credential, class, mode, groupID)
-          		t.Logf("PROBE: cleanup class=%d deleted=%d failed=%d", i, deleted, failed)
-          	}
-          	variant := teacherSignVariant{name: "普通签到（拍照+滑块验证）", otherID: "0", photo: true}
-          	class := classes[0]
-          	activeID := publishTeacherSign(t, client, cookies,
-          		teacherPublishQuery(credential.courseID, class.ID, location, variant, variant.name))
-          	t.Logf("PROBE: publish ok")
-          	detail := fetchTeacherActiveData(t, client, cookies, activeID)
-          	t.Logf("PROBE: detail ok")
-          	verifyTeacherSign(t, variant, location, detail)
-          	t.Logf("PROBE: verify ok")
-          	verifyTeacherSignEndTime(t, detail, nextSaturdayFiveAM(time.Now()))
-          	t.Logf("PROBE: end_time ok")
-          }
-          EOF
-          # 失败时 test 会打印含 ID 的细节，只回显阶段标记，不回显原始输出。
-          go test ./tests/live -run TestProbeStages -v -count=1 > probe.log 2>&1 || true
-          grep -oE "PROBE: [a-z_ ]+(ok|failed)[^\"']*" probe.log | sed -E 's/[0-9]{4,}/***/g' || true
+          set +e
+          go test ./tests/live -run TestLiveTeacherPublishAllSignTypes -v -count=1 > probe.log 2>&1
+          rc=$?
+          if [ "$rc" -eq 0 ]; then
+            echo "PROBE: full_test ok"
+          else
+            echo "PROBE: full_test failed rc=$rc"
+          fi
+          echo "--- 失败的子测试 ---"
+          grep -aE "^--- FAIL|^    --- FAIL" probe.log
+          echo "--- 失败位置（file:line） ---"
+          grep -aoE "(teacher_sign_[a-z_]+_test|helpers)_test\.go:[0-9]+" probe.log | sort -u
+          echo "--- 命中的固定错误标签 ---"
+          for key in \
+            "签到类型不符" \
+            "应开启滑块验证" \
+            "上游未把防作弊标记置为开启" \
+            "应开启微信内签到限制" \
+            "应要求拍照" \
+            "应开启人脸识别" \
+            "应指定签到地点" \
+            "签到地点文案不符" \
+            "签到纬度不符" \
+            "签到经度不符" \
+            "签到范围不符" \
+            "二维码签到不应开启自动更新" \
+            "静态二维码的刷新间隔应为" \
+            "手势签到码不符" \
+            "签到结束时间" \
+            "个旧活动删除失败" \
+            "发起签到失败" \
+            "读取签到详情失败" \
+            "获取签到二维码失败" \
+            "panic:"; do
+            if grep -aqF "$key" probe.log; then
+              printf 'PROBE_HIT: %s\n' "$key"
+            fi
+          done
           rm -f probe.log
