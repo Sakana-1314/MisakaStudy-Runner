@@ -1,6 +1,6 @@
 name: 服务端镜像构建
 
-# 由 MisakaStudy 仓库 trigger.yml 经 repository_dispatch(misaka_push) 触发，仅在 server/** 变更时构建；
+# 由 MisakaStudy 仓库 trigger.yml 经 repository_dispatch(misaka_push) 触发，仅在 server/core/** 变更时构建；
 # 也可在 Runner 仓库手动触发（workflow_dispatch，构建本镜像）。
 on:
   repository_dispatch:
@@ -34,7 +34,7 @@ jobs:
           ref: ${{ github.event.client_payload.ref }}
           filters: |
             server:
-              - 'server/**'
+              - 'server/core/**'
 
   build:
     name: 构建并推送服务端镜像
@@ -70,8 +70,8 @@ jobs:
       - name: 构建并推送
         uses: docker/build-push-action@v7
         with:
-          context: ./server
-          file: ./server/Dockerfile
+          context: ./server/core
+          file: ./server/core/Dockerfile
           push: true
           tags: sgccr.ccs.tencentyun.com/misaka-network/chaoxing:server
           platforms: linux/amd64,linux/arm64
