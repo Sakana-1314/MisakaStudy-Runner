@@ -52,9 +52,11 @@ jobs:
             echo "PROBE: full_test failed rc=$rc"
           fi
           echo "--- 失败的子测试 ---"
-          grep -aE "^--- FAIL|^    --- FAIL" probe.log
+          grep -aE "^ *--- FAIL" probe.log
+          echo "--- 发布汇总（class/name/result，与运行摘要同口径） ---"
+          sed -nE 's/.*发布汇总：(.*)/\1/p' probe.log
           echo "--- 失败位置（file:line） ---"
-          grep -aoE "(teacher_sign_[a-z_]+_test|helpers)_test\.go:[0-9]+" probe.log | sort -u
+          grep -aoE "[a-z_]+_test\.go:[0-9]+" probe.log | sort -u
           echo "--- 命中的固定错误标签 ---"
           for key in \
             "签到类型不符" \
@@ -76,7 +78,20 @@ jobs:
             "发起签到失败" \
             "读取签到详情失败" \
             "获取签到二维码失败" \
-            "panic:"; do
+            "panic:" \
+            "请勿频繁" \
+            "操作频繁" \
+            "系统繁忙" \
+            "非法请求" \
+            "未登录" \
+            "非教师" \
+            "无权限" \
+            "验证码" \
+            "滑块" \
+            "timeout" \
+            "connection" \
+            "EOF" \
+            "HTML"; do
             if grep -aqF "$key" probe.log; then
               printf 'PROBE_HIT: %s\n' "$key"
             fi
