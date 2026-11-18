@@ -1,10 +1,5 @@
 name: 小程序端镜像构建
 
-# 由 MisakaStudy 仓库 trigger.yml 经 repository_dispatch(misaka_push) 触发，仅在 miniprogram/** 变更时构建；
-# 也可在 Runner 仓库手动触发（workflow_dispatch，构建本镜像）。
-#
-# 镜像只包含 ci-client 与它的运行依赖：小程序代码由 upload-miniprogram.yml 打进加密包并按版本发布，
-# 上传节点在运行时按 targetVersion 拉取，因此镜像不再随小程序代码版本重建，也没有 VERSION 构建参数。
 on:
   repository_dispatch:
     types: [misaka_push]

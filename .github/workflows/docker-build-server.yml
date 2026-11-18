@@ -1,7 +1,5 @@
 name: 服务端镜像构建
 
-# 由 MisakaStudy 仓库 trigger.yml 经 repository_dispatch(misaka_push) 触发，仅在 server/core/** 变更时构建；
-# 也可在 Runner 仓库手动触发（workflow_dispatch，构建本镜像）。
 on:
   repository_dispatch:
     types: [misaka_push]

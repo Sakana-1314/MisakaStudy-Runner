@@ -1,12 +1,5 @@
 name: 清理工作流运行记录
 
-# 每天 06:00（北京时间，UTC+8）= 前一天 22:00 UTC。
-# Runner 是公开仓库：删除所有已完成的 workflow run（含日志、摘要与产物），
-# 避免测试输出在 Actions 历史里长期留存。
-#
-# 只删除 completed 且完成时间早于本次任务启动前 15 分钟的运行：
-#   - 正在跑/排队的任务不打断；
-#   - 刚结束的运行保留到下一个周期。
 on:
   schedule:
     - cron: '0 22 * * *'
@@ -48,9 +41,6 @@ jobs:
           total_deleted=0
           total_failed=0
 
-          # 不能用 status=completed 过滤：GitHub 对该过滤最多只回 1000 条，旧记录会永远删不到。
-          # 全量分页拉取后在 jq 里筛 status/时间；分页期间有新 run 插入时可能错位，
-          # 因此多跑几轮，并用 sort -u 去重。
           for pass in 1 2 3; do
             ids="$(gh api --paginate "repos/$REPO/actions/runs?per_page=100" \
               --jq ".workflow_runs[] | select(.status == \"completed\") | select(.id != $CURRENT_RUN_ID) | select((.updated_at | fromdateiso8601) < $cutoff) | .id" \
@@ -63,12 +53,10 @@ jobs:
               if gh api -X DELETE "repos/$REPO/actions/runs/$id" >/dev/null 2>&1; then
                 deleted=$((deleted + 1))
               elif ! gh api "repos/$REPO/actions/runs/$id" >/dev/null 2>&1; then
-                # 已被并发删除（404）视为成功
                 deleted=$((deleted + 1))
               else
                 failed=$((failed + 1))
               fi
-              # 写接口按 GitHub 建议放慢，避免触发二级限流
               sleep 1
             done
 

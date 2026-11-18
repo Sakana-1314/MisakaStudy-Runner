@@ -1,9 +1,5 @@
 name: 基础测试
 
-# 由 MisakaStudy 仓库的 trigger.yml 通过 repository_dispatch 触发（PR 事件）
-# 检出 MisakaStudy 对应 commit 执行测试；OpenAPI 导出先推送规范到 PR 分支，
-# checks 在其后把聚合状态回写到「PR 当前 head」（避免导出 commit 使旧 head 的
-# status 在 PR 上失效），并以单条固定评论汇总门禁结果。
 on:
   repository_dispatch:
     types: [misaka_pr]
@@ -59,9 +55,6 @@ jobs:
           cache-dependency-path: server/core/go.sum
 
       - name: 校验规范与路由表一致
-        # 规范是人工维护的接口事实来源：这里用回归测试锁定「规范 ↔ 注册路由」双向一致、
-        # 每个操作有中文说明与响应 schema、不出现 operationId。不做导出提交，
-        # 规范改动随代码一起进 PR，评审时可见。
         run: go test ./internal/server/ -run 'TestOpenAPISpecMatchesRoutes|TestSpecHasNoExtraPaths' -v
 
       - name: 回写导出状态到 MisakaStudy
@@ -112,7 +105,6 @@ jobs:
           --health-retries=5
 
     env:
-      # 服务端与测试进程共用同一套环境变量（大小写由 config 统一兼容）
       db_user: postgres
       db_password: test
       db_host: 127.0.0.1
@@ -121,7 +113,6 @@ jobs:
       secret: e2e-test-secret-key-32chars!!
       INTERNAL_TOKEN: test-admin-token
       MAIN_APPID: wx-e2e-test-appid
-      # 真机学习通账号由下面「解析学习通测试凭据」步骤从 CX_STUDENT / CX_TEACHER 解析后写入 GITHUB_ENV
 
     steps:
       - name: 签出 MisakaStudy 代码
@@ -144,23 +135,14 @@ jobs:
         run: go vet ./...
 
       - name: 校验依赖注入装配
-        # 装配已从 google/wire（编译期代码生成）改为 uber/fx（运行期解析）：
-        # `wire check` 不再适用，「生成物与 provider 集合不一致」这类问题也不存在了。
-        # 但编译通过**不代表依赖图完整**，因此改用 fx.ValidateApp 在测试期解析整张图
-        # （tests/arch/wiring_test.go），缺 provider 或循环依赖会在这里被拦下。
         run: go test -run TestDependencyGraph ./tests/arch/
 
       - name: 建表并写入测试数据
-        # 表结构不变量测试与需要库的单元测试都直接打真实 PostgreSQL；库由本仓工具建，
-        # 保证中文列注释的字符集正确（用命令行客户端灌 SQL 会把注释写花）
         run: |
           go run ./cmd/dbinit
           go run ./cmd/dbseed
 
       - name: 解析学习通测试凭据
-        # 机密格式：username=<手机号>&password=<口令>&courseId=<课程>&classId=<班级>
-        # CX_STUDENT 供「绑定 / 签到」真机用例；CX_TEACHER 供教师侧发签到用例。
-        # 两个机密都带 courseId/classId 时以 CX_STUDENT 为准（后解析者覆盖）。
         env:
           CX_STUDENT_RAW: ${{ secrets.CX_STUDENT }}
           CX_TEACHER_RAW: ${{ secrets.CX_TEACHER }}
@@ -195,9 +177,6 @@ jobs:
         run: go test ./... -v
 
       - name: 覆盖率门禁（生产代码不回退）
-        # 覆盖 cmd/ 与 internal/（不含 tests/ 测试基座），要求未覆盖块不超出基线。
-        # 剩余未覆盖块都是防御性分支（覆盖它们需要改生产代码），因此门禁盯的是「不回退」
-        # 而不是把数字凑成 100%：任何新增的未覆盖生产代码都会让这里变红。
         run: |
           set -euo pipefail
           go test -count=1 -coverpkg=./... -coverprofile=cover.out ./...
@@ -227,7 +206,6 @@ jobs:
           --health-retries=5
 
     env:
-      # 被测服务与 E2E 测试进程共用同一套环境变量（含密钥，两边派生的令牌才同源）
       db_user: postgres
       db_password: test
       db_host: 127.0.0.1
@@ -237,7 +215,6 @@ jobs:
       INTERNAL_TOKEN: test-admin-token
       MAIN_APPID: wx-e2e-test-appid
       E2E_BASE_URL: http://127.0.0.1:8000
-      # 真机学习通账号由下面「解析学习通测试凭据」步骤从 CX_STUDENT / CX_TEACHER 解析后写入 GITHUB_ENV
 
     steps:
       - name: 签出 MisakaStudy 代码
@@ -254,9 +231,6 @@ jobs:
           cache-dependency-path: server/core/go.sum
 
       - name: 解析学习通测试凭据
-        # 机密格式：username=<手机号>&password=<口令>&courseId=<课程>&classId=<班级>
-        # CX_STUDENT 供「绑定 / 签到」真机用例；CX_TEACHER 供教师侧发签到用例。
-        # 两个机密都带 courseId/classId 时以 CX_STUDENT 为准（后解析者覆盖）。
         env:
           CX_STUDENT_RAW: ${{ secrets.CX_STUDENT }}
           CX_TEACHER_RAW: ${{ secrets.CX_TEACHER }}
@@ -288,9 +262,6 @@ jobs:
           parse CX_TEACHER "$CX_TEACHER_RAW"
           parse CX "$CX_STUDENT_RAW"
       - name: 运行端到端测试
-        # 测试自行完成：起假上游（微信 / 超星 / QQ，不触网）→ 建表与种子 → 编译并拉起真实
-        # 服务端进程（随机端口）→ 跑完全部接口用例 → 收尾。因此这里不需要预先启动服务，
-        # 也不会与开发机上已运行的服务抢 8000 端口。
         run: go test ./tests/e2e/... -v
 
       - name: 上传服务端日志
@@ -298,8 +269,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: server-logs
-          # 服务端由测试进程拉起在自己的临时目录里；失败时日志已随 `go test -v` 打进构建输出。
-          # 这里额外收集仓库内日志目录（本地路径场景），缺失不报错。
           path: |
             server/core/logs/
             /tmp/e2e-run/server.log
@@ -315,7 +284,6 @@ jobs:
         working-directory: server/core
 
     env:
-      # 只做必填项；上游地址一律用配置默认值（即现网地址），真实请求测试要的正是那套默认值
       secret: live-upstream-test-secret-32byte
       db_name: misaka_test
       db_user: postgres
@@ -324,7 +292,6 @@ jobs:
       db_port: 5432
       INTERNAL_TOKEN: live-internal-token
       MAIN_APPID: wx-live-test
-      # 打开真实请求开关：显式开启后网络不可达按失败处理，不会伪装成 skip
       LIVE_UPSTREAM: '1'
 
     steps:
@@ -342,11 +309,6 @@ jobs:
           cache-dependency-path: server/core/go.sum
 
       - name: 运行真实上游测试
-        # 打真实第三方：超星滑块验证码与登录页、DoH、QQ 机器人、飞书、钉钉、EdgeOne。
-        # 微信侧（jscode2session / access_token / getuserencryptkey）需要真实小程序凭据与
-        # 真实用户 code，不在本 job 覆盖；假上游对应的 E2E job 已覆盖微信链路。
-        # 用假凭据打真实服务，断言拿到确定的**业务错误**——这验证地址、参数名、签名算法
-        # 与错误解析在真实服务面前成立（假上游只能证明代码自洽）。
         run: go test ./tests/live/... ./internal/upstreams/feishu/... ./internal/upstreams/edgeone/... -v
 
   server-fuzz-tests:
@@ -384,11 +346,6 @@ jobs:
           cache-dependency-path: server/core/go.sum
 
       - name: 模糊测试安全解析入口
-        # 这些函数（令牌、签名值、cookie、clientId）的输入全部来自网络，最重要的不变量是
-        # 「任意字节串都不得 panic」与「未正确签名的输入绝不被接受」。
-        # 目标包与目标名都从代码里现扫、不写死路径与函数名：主仓库搬包、改名或新增 fuzz
-        # 目标时，这里不会再因为「找不到包 / 找不到目标」而红。时长按目标数控制，靠
-        # `-fuzztime` 固定单个目标的时长，门禁总耗时可控。
         run: |
           set -euo pipefail
           dirs="$(grep -rl --include='*_test.go' -E '^func Fuzz' internal || true)"
@@ -409,7 +366,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: fuzz-corpus-server
-          # 语料始终落在「发现目标的那个包」的 testdata/fuzz/ 下，因此按通配收集
           path: server/core/internal/**/testdata/fuzz/
           if-no-files-found: ignore
 
@@ -482,8 +438,6 @@ jobs:
 
   checks:
     name: 测试通过检查
-    # 无论测试/导出 job 是跳过还是失败都运行，聚合为明确的合并门禁结论；
-    # 依赖 export-openapi 保证导出 commit 已落地后，再回写到 PR 当前 head。
     if: always()
     needs: [detect, export-openapi, server-tests, server-e2e, server-live-tests, server-fuzz-tests, edge-apis-tests, edge-manger-tests]
     runs-on: ubuntu-24.04
@@ -522,7 +476,6 @@ jobs:
             CUR="$(gh api "repos/Sakana-1314/MisakaStudy/pulls/$PR_NUMBER" --jq '.head.sha' 2>/dev/null || true)"
             if [ -n "$CUR" ]; then HEAD="$CUR"; fi
           fi
-          # job context 无 name 字段、github.job_id 在配置阶段为空，改为按本步骤名反查当前 job 的 ID
           TEST_JOB_ID="$(gh api "repos/${{ github.repository }}/actions/runs/$RUN_ID/jobs" \
             --jq '.jobs[] | select(any(.steps[]; .name == "回写测试状态到 MisakaStudy")) | .id' | head -1)"
           EXP_JOB_ID="$(gh api "repos/${{ github.repository }}/actions/runs/$RUN_ID/jobs" \
@@ -536,7 +489,6 @@ jobs:
             -f description='由 MisakaStudy-Runner 仓库代为执行' \
             -f target_url="$TEST_RUN_URL"
 
-          # 单条固定评论：先在 PR 上找固定标记的已有评论，存在则更新，否则新增
           if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "null" ]; then
             MARKER='🤖 **MisakaStudy Runner** 门禁汇总'
             state_text="✅"

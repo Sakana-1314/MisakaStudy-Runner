@@ -1,18 +1,5 @@
 name: 签到发布
 
-# 每天 01:30（北京时间，UTC+8）= 前一天 17:30 UTC 自动执行；也可在 Actions 页手动运行。
-# 签到截止次日 01:30；每天 01:00 的「签到清理」会先删除班级内全部活动，二者配合不堆积。
-# 执行 MisakaStudy 的教师侧发签到 live 用例 TestLiveTeacherPublishAllSignTypes：
-#   普通（拍照+滑块验证）、手势、手势+指定地点、位置+指定地点、位置+指定地点+人脸、
-#   二维码+指定地点+人脸+静态码。
-# 需要 CX_TEACHER 机密（格式 courseId=...&username=...&password=...；classId 可选）。
-# 需要 CX_STUDENT 机密（格式 username=...&password=...），供发布后的学生账号自签。
-# 自动触发（schedule）：CX_SIGN_TRIGGER=auto，删除班级内全部活动，发布后移入“自动发布”；
-# 手动触发（workflow_dispatch）：默认 CX_SIGN_TRIGGER=manual，只删“手动发布”分组里的签到；
-#   也可把 mode 填成 auto 等同定时触发（定时缺跑时手动补跑用）。
-# 两种模式都会在每个签到发布成功后用学生账号自签一次，结果写入运行摘要的表格。
-# 定时触发签出 MisakaStudy 默认分支（next）；手动触发可指定 ref（分支或 commit），
-# 便于在合并前验证 PR 分支（例如拍照签到的 UA 修复）。
 on:
   schedule:
     - cron: '30 17 * * *'
@@ -63,27 +50,19 @@ jobs:
       - name: 校验签到凭据
         env:
           CX_TEACHER: ${{ secrets.CX_TEACHER }}
-          CX_STUDENT: ${{ secrets.CX_STUDENT }}
         run: |
           if [ -z "$CX_TEACHER" ]; then
             echo "缺少 CX_TEACHER 机密，无法发布签到" >&2
             exit 1
           fi
-          if [ -z "$CX_STUDENT" ]; then
-            echo "缺少 CX_STUDENT 机密，无法执行学生账号自签" >&2
-            exit 1
-          fi
 
-      - name: 发布并自签
+      - name: 发布签到
         env:
           LIVE_UPSTREAM: '1'
           CX_TEACHER: ${{ secrets.CX_TEACHER }}
-          CX_STUDENT: ${{ secrets.CX_STUDENT }}
           CX_SIGN_TRIGGER: ${{ github.event_name == 'schedule' && 'auto' || (inputs.mode || 'manual') }}
           TZ: Asia/Shanghai
         run: |
-          # 本仓库是公开仓库：完整测试输出里有 classId、activeId、自签响应与源码行号，
-          # 只写入 runner 本地临时文件，禁止回显到 Actions 日志。
           if go test ./tests/live/ -run TestLiveTeacherPublishAllSignTypes -v -count=1 > publish.log 2>&1; then
             echo "发布签到流程完成"
           else
@@ -95,13 +74,11 @@ jobs:
       - name: 生成发布摘要
         if: always()
         run: |
-          # 只输出结构化摘要里的班级名、签到名称、自签结果和二维码图片；
-          # 不得回显 publish.log 原文、classId、activeId 或源码行号。
           if [ -f publish.log ]; then
             {
               echo '### 签到发布'
               echo ''
-              echo '| 班级 | 签到名称 | 自签结果 |'
+              echo '| 班级 | 签到名称 | 发布结果 |'
               echo '| --- | --- | --- |'
               sed -nE 's/.*发布汇总：(.*)/\1/p' publish.log | while IFS= read -r line; do
                 printf '%s\n' "$line" | jq -r '"| " + (.class | gsub("\\|"; "\\|")) + " | " + (.name | gsub("\\|"; "\\|")) + " | " + (.result | gsub("\\|"; "\\|") | gsub("\r"; "") | gsub("\n"; "<br>")) + " |"' || true

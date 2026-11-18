@@ -1,32 +1,16 @@
 name: 同步 OpenAPI 到 Apifox
 
-# 触发方式：
-#   1) 自动：MisakaStudy（私有侧）push next 后经 repository_dispatch(misaka_push) 派发；
-#      仅当本次 push 改动了 server/core/openapi.yaml 才导入，保证 Apifox 主分支与主干规范一致。
-#   2) 手动：本仓库 Actions 页「Run workflow」，签出 MisakaStudy 默认分支（next）并强制导入一次。
-#
-# 导入走 Apifox 开放 API（POST /v1/projects/{projectId}/import-openapi），不用 apifox-cli：
-# CLI 属「自动化调用方」，写主分支会被 Apifox 的 AI 权限保护拦截（Automation caller branch required），开放 API 无此限制。
-#
-# 同步语义：仓库里的 server/core/openapi.yaml 是唯一事实来源，导入是整体覆盖而非增量追加——
-# 匹配到的接口/数据模型按 method+path、名称覆盖，规范里已不存在的接口/数据模型一并删除
-# （deleteUnmatchedResources），否则接口删掉后 Apifox 里仍会残留。
-# 代价：该项目内不属于本规范的手工资源同样会被清除，接口只写在 Apifox 里就会被下次同步抹掉。
-# 机密：APIFOX_TOKEN（Apifox「用户头像 → 账号设置 → API 访问令牌」），仅经环境变量透传，不落日志。
-# 安全红线（公开仓库）：仅允许 repository_dispatch 与 workflow_dispatch，不配置 push / pull_request 直接触发。
 
 on:
   workflow_dispatch:
   repository_dispatch:
     types: [misaka_push]
 
-# Apifox 同一时刻只允许一个导入任务，串行化避免并发导入被拒
 concurrency:
   group: sync-apifox
   cancel-in-progress: false
 
 env:
-  # Apifox 项目「Misaka 小程序项目」的项目 ID（项目设置 - 基本设置 - 项目 ID）
   APIFOX_PROJECT_ID: "8883565"
 
 jobs:
@@ -52,11 +36,9 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$EVENT" != "repository_dispatch" ]; then
-            # 手动运行：不做路径过滤，直接同步当前签出提交里的规范
             echo "sync=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # 自动运行：本次 push 没动过 server/core/openapi.yaml 就没有规范变更，跳过导入
           CHANGED="$(gh api "repos/Sakana-1314/MisakaStudy/compare/$BEFORE...$REF" --jq '.files[].filename' || true)"
           if printf '%s\n' "$CHANGED" | grep -qx 'server/core/openapi.yaml'; then
             echo "sync=true" >> "$GITHUB_OUTPUT"
@@ -75,16 +57,10 @@ jobs:
 
           BODY="$RUNNER_TEMP/apifox-import.json"
           RESP="$RUNNER_TEMP/apifox-response.json"
-          # 覆盖式导入会连带删除 Apifox 里规范已不存在的资源，规范异常（paths 为空）会清空整个项目，
-          # 因此先确认规范里确实解析出接口路径再发起导入。
           PATHS="$(grep -cE '^  /' server/core/openapi.yaml || true)"
           [ "$PATHS" -gt 0 ] || { echo "::error::server/core/openapi.yaml 里没有解析到接口路径，拒绝覆盖导入以免清空 Apifox 项目"; exit 1; }
           echo "规范内接口路径数：$PATHS"
 
-          # input 直接给规范文本：MisakaStudy 是私有仓库，openapi.yaml 的 raw 地址无法匿名拉取。
-          # updateFolderOfChangedEndpoint=true：规范的 tags 是接口所属目录的唯一来源，
-          # 已存在的接口也要跟着 tag 走，否则它们会一直留在 Root 目录。
-          # deleteUnmatchedResources=true：覆盖式同步，规范里删掉的接口/数据模型在 Apifox 一并删除。
           jq -n --rawfile spec server/core/openapi.yaml \
             '{input:$spec, options:{endpointOverwriteBehavior:"OVERWRITE_EXISTING", schemaOverwriteBehavior:"OVERWRITE_EXISTING", updateFolderOfChangedEndpoint:true, deleteUnmatchedResources:true}}' \
             > "$BODY"
@@ -109,14 +85,12 @@ jobs:
           [ "$CODE" = "200" ] || { echo "::error::调用 Apifox 导入接口失败（HTTP $CODE）"; exit 1; }
           jq -e '.data.counters' "$RESP" > /dev/null || { echo "::error::Apifox 返回内容异常，未取到导入统计"; exit 1; }
 
-          # 删除数是覆盖式同步的预期结果（规范里已不存在的资源被清掉），只打印不作为失败条件
           jq -r '.data.counters | "接口：新增 \(.endpointCreated) / 更新 \(.endpointUpdated) / 忽略 \(.endpointIgnored) / 失败 \(.endpointFailed) / 删除 \(.endpointDeleted)，数据模型：新增 \(.schemaCreated) / 更新 \(.schemaUpdated) / 忽略 \(.schemaIgnored) / 失败 \(.schemaFailed) / 删除 \(.schemaDeleted)"' "$RESP"
 
           FAILED="$(jq '[.data.counters | to_entries[] | select(.key | test("Failed$")) | .value] | add // 0' "$RESP")"
           [ "$FAILED" = "0" ] || { echo "::error::存在导入失败条目（$FAILED 项），详见上方 Apifox 响应"; exit 1; }
 
       - name: 回写同步状态到 MisakaStudy
-        # 未同步时（本次未改动规范）不回写，避免给无关提交挂状态
         if: always() && steps.check.outputs.sync == 'true'
         env:
           GH_TOKEN: ${{ secrets.PAT }}

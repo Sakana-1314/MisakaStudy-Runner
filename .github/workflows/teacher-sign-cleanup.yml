@@ -1,10 +1,5 @@
 name: 签到清理
 
-# 每天 01:00（北京时间，UTC+8）= 前一天 17:00 UTC 自动执行；也可在 Actions 页手动运行。
-# 以 auto 模式跑 MisakaStudy 的 TestLiveTeacherDeleteAllSigns：删除课程下每个班级里的
-# **全部活动**（不论类型、不论分组、不论是谁发的），30 分钟后「签到发布」再发新的一批，
-# 签到截止次日 01:30，因此不会堆积；手动发布的签到也随下一次清理删除。
-# 需要 CX_TEACHER 机密（格式 courseId=...&username=...&password=...；classId 可选）。
 on:
   schedule:
     - cron: '0 17 * * *'
@@ -60,8 +55,6 @@ jobs:
           CX_SIGN_TRIGGER: auto
           TZ: Asia/Shanghai
         run: |
-          # 本仓库是公开仓库：完整输出里有 classId、activeId、活动标题，只写 runner 本地日志，
-          # 失败也不回显；摘要只保留不含 ID 的删除计数。
           if go test ./tests/live -run TestLiveTeacherDeleteAllSigns -v -count=1 > cleanup.log 2>&1; then
             echo "活动清理完成"
           else

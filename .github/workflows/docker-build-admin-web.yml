@@ -1,10 +1,5 @@
 name: 管理端前端镜像构建
 
-# 由 MisakaStudy 仓库 trigger.yml 经 repository_dispatch(misaka_push) 触发，仅在 web/** 变更时构建；
-# 也可在 Runner 仓库手动触发（workflow_dispatch，构建本镜像）。
-#
-# 与 docker-build-server.yml 同构：私有仓库的 push 事件是**无条件**派发的，
-# 具体该不该构建由本文件的 paths-filter 判断，因此 trigger.yml 不必改。
 on:
   repository_dispatch:
     types: [misaka_push]
@@ -65,8 +60,6 @@ jobs:
           username: ${{ secrets.TENCENT_REGISTRY_USERNAME }}
           password: ${{ secrets.TENCENT_REGISTRY_PASSWORD }}
 
-      # 产物是纯静态站点，接口地址由用户在登录页填写（见 web/admin/src/stores/endpoint.ts），
-      # 因此**不需要任何构建期变量**：一份镜像连任意后端。
       - name: 构建并推送
         uses: docker/build-push-action@v7
         with:
