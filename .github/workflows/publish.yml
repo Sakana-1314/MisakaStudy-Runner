@@ -1,11 +1,5 @@
 name: 发布
 
-# 触发方式：仅支持本仓库 Actions 页「Run workflow」手动运行。
-# 语义：仓库机密 PUBLISH 存有一段 bash 发布脚本；本工作流把该机密落盘后执行。
-# 说明：
-#   - 签出私有 MisakaStudy 代码默认分支（经 secrets.PAT），脚本工作目录即其仓库根。
-#   - PUBLISH 内容属于机密：只经环境变量透传给步骤，绝不明文写入命令/日志。
-#   - 安全红线（公开仓库）：仅允许 workflow_dispatch，不配置 push / pull_request 触发。
 
 on:
   workflow_dispatch:
@@ -43,12 +37,9 @@ jobs:
           [ -n "$PUBLISH_SCRIPT" ] || { echo "未找到机密 PUBLISH，请先在仓库 Settings → Secrets 配置后重试"; exit 1; }
 
           SCRIPT="$RUNNER_TEMP/publish.sh"
-          # PUBLISH 是一整段 bash 脚本：原样落盘再执行，避免把机密展开进命令行（防注入/防泄漏）。
-          # 顺带去掉粘贴可能带入的 CR，保证 \r 不会混进脚本。
           printf '%s\n' "$PUBLISH_SCRIPT" | sed 's/\r$//' > "$SCRIPT"
           chmod +x "$SCRIPT"
 
-          # 工作区已签出 MisakaStudy 默认分支，把实际分支名透传给脚本（detached 时退回短 SHA）
           PUBLISH_REF="$(git symbolic-ref --short -q HEAD || git rev-parse --short HEAD)"
           export PUBLISH_REF
           echo "工作区为 MisakaStudy@${PUBLISH_REF}，开始执行发布脚本…"

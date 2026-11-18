@@ -1,30 +1,5 @@
 name: 小程序代码上传
 
-# 触发方式：
-#   1) 手动：本仓库 Actions 页「Run workflow」，签出 MisakaStudy 默认分支（next），
-#      把源码上传为体验版（版本号 vYYYY.MM.DD-misaka.NN，同日两位自增不重复）。
-#   2) 自动：MisakaStudy（私有侧）在 trigger.yml 判断 miniprogram/** 是否改动，
-#      命中后经 repository_dispatch(misaka_miniprogram) 派发——Runner 收到请求即始终执行上传，
-#      不再自行过滤路径。
-#      - PR 事件（开启/同步）：版本号「PR #<编号>」（开发期临时版，占用 CI 机器人 21-30）。
-#      - PR 事件（合并，closed+merged）：以完全相同的 commit 再传一次「PR #<编号>（已合并）」。
-#      - PR 事件（关闭未合并，closed+!merged）：以完全相同的 commit 再传一次「PR #<编号>（已关闭）」。
-#      - push 事件（PR 合并落库后 next 的主分支提交）：版本号 vYYYY.MM.DD-misaka.NN（读源码仓库最后一次 tag 同日期两位自增），
-#        版本描述取该 commit 的标题，robot 1。
-# 所有上传都只上传为开发版本，不会提交审核；PR 上传的版本描述统一写「由 GitHub Actions 自动上传！」。
-# 上传前调用 miniprogram/scripts/inject-build-info.js，把版本号与构建时间写进被上传代码的
-# utils/config.ci.js——开发版/体验版无法从 wx.getAccountInfoSync 取到线上版本号，只能这样注入。
-#
-# 除直传外，本工作流还会用 miniprogram/scripts/build-ci-package.sh 完成 npm 构建、打包并用
-# 仓库机密 ZIP_PASSWORD 加密，发布到本仓库的 Release（tag 为 mp-<版本号 sha256 前 16 位>，
-# 资产名 miniprogram.zip）。上传节点里的 ci-client 按服务端下发的 targetVersion 拉取它，
-# 节点侧不再安装依赖或构建。
-# **PR 事件只做直传，不发布代码包**；只有合并后的 push（或手动发版）才发布，供上传节点使用。
-#
-# appid 与代码上传密钥取自检出的 MisakaStudy 仓库自身：
-#   - appid：miniprogram/project.config.json 的 appid 字段
-#   - 密钥：miniprogram/.private/private.<appid>.key
-# 因此本工作流无需额外私密即可运行。
 
 on:
   workflow_dispatch:
@@ -55,7 +30,6 @@ jobs:
   upload:
     name: 上传小程序
     runs-on: ubuntu-24.04
-    # 发布代码包需要创建 Release 与上传资产；直传部分仍用 PAT 回写 MisakaStudy。
     permissions:
       contents: write
     steps:
@@ -89,8 +63,6 @@ jobs:
           set -euo pipefail
           if [ "$EVENT" = "repository_dispatch" ]; then
             if [ "$PAYLOAD_EVENT" = "pull_request" ]; then
-              # 检出的仍是 PR head commit，无论合并/关闭/开启代码内容完全一致
-              # 查 PR 状态：merged →「PR #N（已合并）」；closed →「PR #N（已关闭）」；其余 →「PR #N」
               PR_DATA="$(gh api repos/Sakana-1314/MisakaStudy/pulls/"$PR_NUMBER")"
               MERGED="$(echo "$PR_DATA" | jq -r '.merged')"
               STATE="$(echo "$PR_DATA" | jq -r '.state')"
@@ -104,11 +76,9 @@ jobs:
               ROBOT=$(( 21 + (PR_NUMBER % 10) ))
               DESC="由 GitHub Actions 自动上传！"
             else
-              # push 主分支（PR 合并落库后）：版本号 vYYYY.MM.DD-misaka.NN（读源码仓库最后一次 tag 同日期两位自增）；robot 1
               ROOT="$(git rev-parse --show-toplevel)"
               VERSION="$("$ROOT/miniprogram/scripts/next-version.sh" Sakana-1314/MisakaStudy)"
               ROBOT=1
-              # 版本描述取被上传 commit 的标题，体验版版本记录里直接看得出这次改了什么
               DESC="$(git log -1 --pretty=%s)"
             fi
           else
@@ -126,7 +96,6 @@ jobs:
           echo "desc=$DESC" >> "$GITHUB_OUTPUT"
 
       - name: 构建并发布代码包
-        # PR 版本只直传体验版，不发布代码包；合并后的 push 与手动发版才发布。
         if: github.event_name != 'repository_dispatch' || github.event.client_payload.event_name != 'pull_request'
         working-directory: miniprogram
         env:
@@ -141,7 +110,6 @@ jobs:
           OUTPUT="${RUNNER_TEMP}/miniprogram.zip"
           bash scripts/build-ci-package.sh "$VERSION" "$OUTPUT"
 
-          # 与 ci/ci-client.js 的 packageTag 保持同一算法：版本号可能含空格/中文，tag 用摘要
           TAG="mp-$(printf '%s' "$VERSION" | sha256sum | cut -c1-16)"
           NOTES="小程序加密代码包；版本 ${VERSION}；构建时间 $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
@@ -166,8 +134,6 @@ jobs:
           KEY_PATH=".private/private.${APPID}.key"
           [ -f "$KEY_PATH" ] || { echo "未找到代码上传密钥 $KEY_PATH"; exit 1; }
 
-          # PR 事件不会执行上面的「构建并发布代码包」，直传前必须先构建 miniprogram_npm，
-          # 否则 usingComponents 里的 tdesign 组件找不到。
           npx --no-install miniprogram-ci pack-npm \
             --pp ./ \
             --pkp "$KEY_PATH" \
@@ -176,10 +142,7 @@ jobs:
             echo "miniprogram_npm/tdesign-miniprogram 构建产物缺失"; exit 1;
           }
 
-          # BASE_URL 是机密，GitHub 会在日志里打码；未配置时回落「线上」以便一眼看出覆盖没生效
           echo "上传目标 appid=${APPID} version=${VERSION} robot=${ROBOT} baseUrl=${BASE_URL:-线上}"
-          # 开发版/体验版取不到线上版本号，把本次版本号与构建时间注入代码（设置页版本信息栏展示）；
-          # BASE_URL（机密，未配置时为空）一并传入，用于把体验版指向开发环境
           node scripts/inject-build-info.js "$VERSION" "$(date +%s)"
           npx --no-install miniprogram-ci upload \
             --appid "$APPID" \
@@ -207,11 +170,9 @@ jobs:
         run: |
           state=failure
           if [ "${{ job.status }}" = "success" ]; then state=success; fi
-          # job context 无 name 字段，改为按本步骤名反查当前 job 的 ID
           JOB_ID="$(gh api "repos/${{ github.repository }}/actions/runs/$RUN_ID/jobs" \
             --jq '.jobs[] | select(any(.steps[]; .name == "回写上传状态到 MisakaStudy")) | .id' | head -1)"
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/$RUN_ID/job/$JOB_ID"
-          # 工作目录根即检出的 MisakaStudy，取当前 HEAD 作为所上传的 commit
           SHA="$(git rev-parse HEAD)"
           gh api -X POST \
             repos/Sakana-1314/MisakaStudy/statuses/"$SHA" \
@@ -220,7 +181,6 @@ jobs:
             -f description='由 MisakaStudy-Runner 仓库代为执行' \
             -f target_url="$RUN_URL"
 
-          # PR 事件在 PR 上发一条 bot 评论，附上传 Job 链接
           if [ "$EVENT" = "repository_dispatch" ] && [ -n "$PR_NUMBER" ]; then
             if [ "$state" = "success" ]; then
               summary="小程序代码已上传为体验版（PR #${PR_NUMBER}）✅"

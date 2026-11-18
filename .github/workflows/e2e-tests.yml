@@ -1,7 +1,5 @@
 name: 端到端模拟测试
 
-# 由 MisakaStudy 仓库的 trigger.yml 通过 repository_dispatch 触发（push 事件）
-# 仅当 server 路径有变更时运行，并把状态回写到对应 commit
 on:
   repository_dispatch:
     types: [misaka_push]
@@ -61,12 +59,9 @@ jobs:
       db_port: 5432
       db_name: misaka_e2e
       secret: e2e-test-secret-key-32chars!!
-      # 内部令牌由环境变量注入，服务端进程与 E2E 客户端须取同一值
       INTERNAL_TOKEN: test-admin-token
-      # 主小程序 AppID（必填）：取测试假值，与 cmd/dbseed 种子的小程序一致
       MAIN_APPID: wx-e2e-test-appid
       E2E_BASE_URL: http://127.0.0.1:8000
-      # 真机学习通账号由下面「解析学习通测试凭据」步骤从 CX_STUDENT / CX_TEACHER 解析后写入 GITHUB_ENV
 
     steps:
       - name: 签出 MisakaStudy 代码
@@ -90,7 +85,6 @@ jobs:
       - name: 启动后端服务
         run: |
           go build -o /tmp/misaka-server ./cmd/server
-          # 服务在 /tmp/e2e-run 下启动：logs/ 等运行期文件写到可写目录，不污染检出目录。
           cd /tmp && mkdir -p e2e-run && cd e2e-run
           nohup /tmp/misaka-server > /tmp/e2e-run/server.log 2>&1 &
           echo $! > /tmp/server.pid
@@ -110,9 +104,6 @@ jobs:
           exit 1
 
       - name: 解析学习通测试凭据
-        # 机密格式：username=<手机号>&password=<口令>&courseId=<课程>&classId=<班级>
-        # CX_STUDENT 供「绑定 / 签到」真机用例；CX_TEACHER 供教师侧发签到用例。
-        # 两个机密都带 courseId/classId 时以 CX_STUDENT 为准（后解析者覆盖）。
         env:
           CX_STUDENT_RAW: ${{ secrets.CX_STUDENT }}
           CX_TEACHER_RAW: ${{ secrets.CX_TEACHER }}
@@ -174,7 +165,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.PAT }}
         run: |
-          # server 无变更跳过时不回写失败状态
           if [ "${{ needs.detect.result }}" = "success" ] && [ "${{ needs.e2e.result }}" = "skipped" ]; then
             echo "::notice::server 路径无变更，跳过 E2E"
             exit 0
