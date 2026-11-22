@@ -47,9 +47,6 @@ jobs:
           ref: ${{ github.event.client_payload.ref || 'next' }}
           token: ${{ secrets.PAT }}
 
-      - name: 安装 QEMU
-        uses: docker/setup-qemu-action@v4
-
       - name: 安装 Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -67,6 +64,6 @@ jobs:
           file: ./server/edge/Dockerfile
           push: true
           tags: sgccr.ccs.tencentyun.com/misaka-network/chaoxing:edge-apis
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           cache-from: type=gha,scope=edge-apis
           cache-to: type=gha,mode=max,scope=edge-apis
