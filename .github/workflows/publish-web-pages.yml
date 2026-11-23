@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       base_path:
-        description: 管理端部署子路径（留空用 /view/admin/；访客端取同级的 guest/）
+        description: 站点部署子路径（留空用 /view/admin/；访客端 / 开放平台 / 文档站取同级目录）
         required: false
         default: ""
         type: string
@@ -84,15 +84,17 @@ jobs:
             ADMIN_BASE="/view/admin/"
           fi
           GUEST_BASE="${ADMIN_BASE%admin/}guest/"
+          OPEN_BASE="${ADMIN_BASE%admin/}open/"
           DOCS_BASE="${ADMIN_BASE%admin/}docs/"
 
           {
             echo "admin_base=$ADMIN_BASE"
             echo "guest_base=$GUEST_BASE"
+            echo "open_base=$OPEN_BASE"
             echo "docs_base=$DOCS_BASE"
             echo "cname=$CNAME"
           } >> "$GITHUB_OUTPUT"
-          echo "管理端=${ADMIN_BASE} 访客端=${GUEST_BASE} 文档站=${DOCS_BASE} 自定义域名=${CNAME:-无}"
+          echo "管理端=${ADMIN_BASE} 访客端=${GUEST_BASE} 开放平台=${OPEN_BASE} 文档站=${DOCS_BASE} 自定义域名=${CNAME:-无}"
 
       - name: 安装 Node
         uses: actions/setup-node@v7
@@ -128,6 +130,16 @@ jobs:
           GUEST_WEB_PREFIX: ${{ steps.base.outputs.guest_base }}
         run: pnpm build
 
+      - name: 安装开放平台依赖
+        working-directory: web/open
+        run: pnpm install --frozen-lockfile
+
+      - name: 构建开放平台
+        working-directory: web/open
+        env:
+          OPEN_WEB_PREFIX: ${{ steps.base.outputs.open_base }}
+        run: pnpm build
+
       - name: 安装文档站依赖
         working-directory: web/docs
         run: npm ci --include=dev
@@ -144,16 +156,18 @@ jobs:
           SOURCE_SHA: ${{ steps.src.outputs.sha }}
           ADMIN_BASE: ${{ steps.base.outputs.admin_base }}
           GUEST_BASE: ${{ steps.base.outputs.guest_base }}
+          OPEN_BASE: ${{ steps.base.outputs.open_base }}
           DOCS_BASE: ${{ steps.base.outputs.docs_base }}
           CNAME: ${{ steps.base.outputs.cname }}
         run: |
           set -euo pipefail
           SITE="${RUNNER_TEMP}/site"
           rm -rf "$SITE"
-          mkdir -p "$SITE/view/admin" "$SITE/view/guest" "$SITE/view/docs"
+          mkdir -p "$SITE/view/admin" "$SITE/view/guest" "$SITE/view/open" "$SITE/view/docs"
 
           cp -a "$GITHUB_WORKSPACE/web/admin/dist${ADMIN_BASE%/}/." "$SITE/view/admin/"
           cp -a "$GITHUB_WORKSPACE/web/guest/dist${GUEST_BASE%/}/." "$SITE/view/guest/"
+          cp -a "$GITHUB_WORKSPACE/web/open/dist${OPEN_BASE%/}/." "$SITE/view/open/"
           cp -a "$GITHUB_WORKSPACE/web/docs/.vitepress/dist/." "$SITE/view/docs/"
 
           touch "$SITE/.nojekyll"
@@ -172,4 +186,4 @@ jobs:
             commit -q -m "chore(web): 发布静态站点（${SOURCE_SHA:0:7}）"
           git -C "$SITE" push --force origin "HEAD:${SITE_BRANCH}"
 
-          echo "已发布 ${ADMIN_BASE}、${GUEST_BASE} 与 ${DOCS_BASE} 到 ${SITE_REPO}@${SITE_BRANCH}"
+          echo "已发布 ${ADMIN_BASE}、${GUEST_BASE}、${OPEN_BASE} 与 ${DOCS_BASE} 到 ${SITE_REPO}@${SITE_BRANCH}"
