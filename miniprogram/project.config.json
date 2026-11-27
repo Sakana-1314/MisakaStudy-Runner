@@ -1,0 +1,10 @@
+{
+  "appid": "touristappid",
+  "compileType": "miniprogram",
+  "projectname": "misaka-suspended",
+  "setting": {
+    "es6": true,
+    "minified": true,
+    "postcss": true
+  }
+}
