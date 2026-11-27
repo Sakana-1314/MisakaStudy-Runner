@@ -1,0 +1,80 @@
+name: 发布停用提示页代码包
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 代码包版本号（小程序的目标版本必须与它一致）
+        required: true
+        default: "over"
+        type: string
+
+concurrency:
+  group: publish-suspended-package
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: 构建并发布代码包
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: 签出代码
+        uses: actions/checkout@v7
+
+      - name: 构建加密代码包
+        env:
+          ZIP_PASSWORD: ${{ secrets.ZIP_PASSWORD }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          [ -n "$ZIP_PASSWORD" ] || { echo "缺少 ZIP_PASSWORD 机密，无法加密代码包"; exit 1; }
+          [ -n "$VERSION" ] || { echo "版本号不能为空"; exit 1; }
+
+          STAGE="$RUNNER_TEMP/package"
+          ZIP_PATH="$RUNNER_TEMP/miniprogram.zip"
+          rm -rf "$STAGE" "$ZIP_PATH"
+          mkdir -p "$STAGE"
+          cp -R miniprogram/. "$STAGE"/
+          cp -R miniprogram-ci-shim/. "$STAGE"/
+          rm -f "$STAGE/.gitignore"
+
+          {
+            echo "{"
+            echo "  \"version\": \"${VERSION}\","
+            echo "  \"timestamp\": $(date +%s)"
+            echo "}"
+          } > "$STAGE/ci-build.json"
+
+          (cd "$STAGE" && zip -q -r -P "$ZIP_PASSWORD" "$ZIP_PATH" .)
+          unzip -t -P "$ZIP_PASSWORD" "$ZIP_PATH" >/dev/null
+          if unzip -t "$ZIP_PATH" </dev/null >/dev/null 2>&1; then
+            echo "代码包未加密：无密码也能读取"; exit 1
+          fi
+
+          LISTING="$(unzip -Z1 "$ZIP_PATH" | sed 's|^\./||')"
+          for required in app.json app.js app.wxss project.config.json ci-build.json \
+              pages/index/index.js pages/index/index.wxml pages/index/index.wxss \
+              miniprogram_npm/tdesign-miniprogram/index.js utils/.gitkeep \
+              static/resource/util.ci.js static/resource/theme/pink.wxss; do
+            grep -qxF "$required" <<< "$LISTING" || { echo "代码包缺少 $required"; exit 1; }
+          done
+          echo "ZIP_PATH=$ZIP_PATH" >> "$GITHUB_ENV"
+
+      - name: 发布到 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          TAG="mp-$(printf '%s' "$VERSION" | sha256sum | cut -c1-16)"
+          NOTES="停用提示页代码包；版本 ${VERSION}；构建时间 $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ZIP_PATH#miniprogram.zip" --clobber
+            gh release edit "$TAG" --title "$VERSION" --notes "$NOTES"
+          else
+            gh release create "$TAG" "$ZIP_PATH#miniprogram.zip" \
+              --title "$VERSION" --notes "$NOTES" --latest=false
+          fi
+          echo "已发布 ${TAG}"
